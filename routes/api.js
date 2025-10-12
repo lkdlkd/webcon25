@@ -26,6 +26,7 @@ const refund = require('@/controllers/order/refundController');
 // router.get('/home', authenticate.authenticateUser, Home.getHomeOverview);
 router.get('/refund', authenticate.authenticateAdmin, refund.getRefunds);
 router.post('/refund/approve', authenticate.authenticateAdmin, refund.adminApproveRefund);
+router.delete('/refund', authenticate.authenticateAdmin, refund.adminDeleteRefunds);
 router.post('/refill', authenticate.authenticateUser, refillCancelController.refillOrder); // ok Thực hiện refill đơn hàng
 router.post('/cancel', authenticate.authenticateUser, refillCancelController.cancelOrder); // ok Thực hiện hủy đơn hàng
 //auth
