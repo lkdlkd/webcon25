@@ -66,6 +66,9 @@ connectDB();
 app.get('/', (req, res) => {
     res.send('API is running...');
 });
+app.get('/api/v2', (req, res) => {
+    res.send('API V2 is running...');
+});
 // Sử dụng routes cho API
 app.use('/api', api);
 app.use('/api/noti', noti);
