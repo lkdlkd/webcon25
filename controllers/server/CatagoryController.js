@@ -1,6 +1,11 @@
 const Category = require("../../models/Category");
 const Platform = require("../../models/platform");
 
+// Escape regex special chars for exact, case-insensitive match
+function escapeRegex(str = "") {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Thêm category mới (chỉ admin)
 exports.addCategory = async (req, res) => {
   try {
@@ -9,12 +14,25 @@ exports.addCategory = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ admin mới có quyền thực hiện thao tác này" });
     }
 
-    const { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
+  let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
 
     // Kiểm tra xem Platform có tồn tại không
     const platform = await Platform.findById(platforms_id);
     if (!platform) {
       return res.status(404).json({ success: false, message: "Platform không tồn tại" });
+    }
+
+    // Chuẩn hóa path
+    if (typeof path === 'string') {
+      path = path.trim();
+    }
+
+    // Kiểm tra path đã tồn tại (không phân biệt hoa/thường)
+    if (path) {
+      const dup = await Category.findOne({ path: { $regex: `^${escapeRegex(path)}$`, $options: 'i' } });
+      if (dup) {
+        return res.status(400).json({ success: false, message: "Path đã tồn tại, vui lòng chọn path khác" });
+      }
     }
 
     // Tạo category mới
@@ -43,13 +61,27 @@ exports.updateCategory = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ admin mới có quyền thực hiện thao tác này" });
     }
 
-    const { id } = req.params;
-    const { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
+  const { id } = req.params;
+  let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
 
     // Kiểm tra xem Category có tồn tại không
     const category = await Category.findById(id);
     if (!category) {
       return res.status(404).json({ success: false, message: "Category không tồn tại" });
+    }
+
+    // Chuẩn hóa và kiểm tra trùng path nếu có cập nhật path
+    if (typeof path === 'string') {
+      path = path.trim();
+      if (path) {
+        const dup = await Category.findOne({
+          path: { $regex: `^${escapeRegex(path)}$`, $options: 'i' },
+          _id: { $ne: id }
+        });
+        if (dup) {
+          return res.status(400).json({ success: false, message: "Path đã tồn tại, vui lòng chọn path khác" });
+        }
+      }
     }
 
     // Cập nhật category

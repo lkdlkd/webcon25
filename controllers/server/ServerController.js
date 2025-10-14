@@ -1,4 +1,5 @@
 const Service = require('../../models/server');
+const Category = require('../../models/Category');
 const User = require('../../models/User');
 
 // Thêm dịch vụ mới (chỉ admin)
@@ -228,39 +229,30 @@ exports.getServerByTypeAndPath = async (req, res) => {
   try {
     const { path } = req.query;
 
-    // Nếu không có path thì trả về lỗi
     if (!path) {
       return res.status(400).json({ success: false, message: "Thiếu tham số path" });
     }
 
-    // Lấy danh sách dịch vụ theo path category
-    const services = await Service.aggregate([
-      {
-        $lookup: {
-          from: "categories",
-          localField: "category",
-          foreignField: "_id",
-          as: "category"
-        }
-      },
-      { $unwind: "$category" },
-      {
-        $match: {
-          "category.path": { $regex: path, $options: "i" }
-        }
-      },
-      { $sort: { thutu: 1 } } // Sắp xếp theo thutu giảm dần, sau đó đến thời gian thêm
-    ]);
+    // Tìm category theo path trước rồi lấy _id
+    // Ưu tiên khớp chính xác theo path (không phân biệt hoa/thường)
+    const category = await Category.findOne({ path: { $regex: `^${path}$`, $options: 'i' } });
 
-    // Lấy thông tin note và modal_show duy nhất từ category
-    const uniqueNotes = services.length > 0
-      ? {
-        note: services[0].category.notes || "",
-        modal_show: services[0].category.modal_show || "",
-      }
-      : { note: "", modal_show: "" };
+    if (!category) {
+      return res.status(200).json({ success: true, notes: { note: "", modal_show: "" }, data: [] });
+    }
 
-    // Định dạng lại dữ liệu trả về
+    // Lấy danh sách dịch vụ theo category._id và chỉ lấy dịch vụ đang hoạt động
+    let services = await Service.find({ category: category._id, isActive: true })
+      .populate("category", "name path thutu")
+      .populate("type", "name logo thutu");
+
+    // Sắp xếp theo thutu tăng dần
+    services = services.sort((a, b) => {
+      const sa = typeof a.thutu === 'number' ? a.thutu : 999999;
+      const sb = typeof b.thutu === 'number' ? b.thutu : 999999;
+      return sa - sb;
+    });
+
     const formattedServices = services.map(service => ({
       description: service.description,
       Magoi: service.Magoi,
@@ -274,7 +266,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
       comment: service.comment,
       reaction: service.reaction,
       matlive: service.matlive,
-      type: service.type,
+      type: service.type ? service.type.name : "không xác định",
       category: service.category?.name || "Không xác định",
       path: service.category?.path || "",
       isActive: service.isActive,
@@ -286,7 +278,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      notes: uniqueNotes,
+      notes: { note: category.notes || "", modal_show: category.modal_show || "" },
       data: formattedServices,
     });
   } catch (error) {
