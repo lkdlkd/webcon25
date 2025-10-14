@@ -10,7 +10,7 @@ const categorySchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now }, // Ngày tạo
   updated_at: { type: Date, default: Date.now }, // Ngày cập nhật
   domain: { type: String, default: null },
-  thutu: { type: Number, default: 2 }, // Thứ tự hiển thị
+  thutu: { type: Number, default: 4 }, // Thứ tự hiển thị
 });
 
 module.exports = mongoose.model("Category", categorySchema);

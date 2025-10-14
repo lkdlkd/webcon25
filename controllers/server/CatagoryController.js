@@ -14,7 +14,7 @@ exports.addCategory = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ admin mới có quyền thực hiện thao tác này" });
     }
 
-  let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
+    let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
 
     // Kiểm tra xem Platform có tồn tại không
     const platform = await Platform.findById(platforms_id);
@@ -61,8 +61,8 @@ exports.updateCategory = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ admin mới có quyền thực hiện thao tác này" });
     }
 
-  const { id } = req.params;
-  let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
+    const { id } = req.params;
+    let { platforms_id, name, path, notes, modal_show, status, thutu } = req.body; // Thêm thutu
 
     // Kiểm tra xem Category có tồn tại không
     const category = await Category.findById(id);

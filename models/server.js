@@ -20,7 +20,7 @@ const serviceSchema = new mongoose.Schema({
   Linkdv: { type: String, required: false },//facebook-like, tiktok-view...
   tocdodukien: { type: String, required: false },//tốc độ dự kiến
   serviceId: { type: String, required: true },//sv ở bên thứ 3
-  thutu: { type: String, required: false , default: 2 },// thứ tự
+  thutu: { type: String, required: false , default: 4 },// thứ tự
   //option
   refil: { type: String, enum: ["on", "off"], default: "off" },//chức năng refil
   cancel: { type: String, enum: ["on", "off"], default: "off" },//chức năng hủy đơn
