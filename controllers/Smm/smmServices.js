@@ -42,12 +42,11 @@ class SmmApiService {
 
   /**
    * @param {object} payload - API params
-   * @param {{ encoding?: 'form'|'multipart'|'json', headers?: Record<string,string> }} [opts]
+   * @param {{ encoding?: 'form'|'multipart'|'json', headers?: Record<string,string>, timeout?: number|false }} [opts]
    */
   async connect(payload, opts = {}) {
     try {
-      const { encoding = this.defaultEncoding, headers = {} } = opts;
-      // loại các key nội bộ
+      const { encoding = this.defaultEncoding, headers = {}, timeout } = opts;
       const { _encoding, ...rest } = payload || {};
       const dataObj = { key: this.apiKey, ...rest };
 
@@ -60,15 +59,21 @@ class SmmApiService {
         data = dataObj;
         reqHeaders = { ...reqHeaders, 'Content-Type': 'application/json' };
       } else {
-        // mặc định: x-www-form-urlencoded
         data = this.buildFormBody(dataObj);
         reqHeaders = { ...reqHeaders, 'Content-Type': 'application/x-www-form-urlencoded' };
       }
 
-      const response = await axios.post(this.apiUrl, data, {
+      const axiosConfig = {
         headers: reqHeaders,
-        timeout: this.timeout,
-      });
+        timeout: 60000, // Default 60s cho tất cả API calls
+      };
+
+      // Override timeout nếu opts có chỉ định cụ thể
+      if (typeof timeout === 'number') {
+        axiosConfig.timeout = timeout;
+      }
+
+      const response = await axios.post(this.apiUrl, data, axiosConfig);
       return response.data;
     } catch (err) {
       const status = err?.response?.status;
@@ -122,7 +127,8 @@ class SmmApiService {
   }
 
   async balance(opts) {
-    return this.connect({ action: 'balance' }, opts);
+    // 👇 Chỉ balance mới có timeout riêng (ví dụ 10 giây)
+    return this.connect({ action: 'balance' }, { ...opts, timeout: 15000 });
   }
 }
 

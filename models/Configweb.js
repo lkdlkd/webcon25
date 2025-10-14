@@ -5,7 +5,7 @@ const configwebSchema = new mongoose.Schema({
   title: { type: String, default: "" },
   logo: { type: String, default: "" },
   favicon: { type: String, default: "" },
-  linktele: { type: String, default: "https://t.me/noti_web_245_bot" },
+  linktele: { type: String, default: "" },
   cuphap: { type: String, default: "naptien" },
   lienhe: [
     {

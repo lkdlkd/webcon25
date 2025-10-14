@@ -13,7 +13,7 @@ exports.getTelegramConfig = async (req, res) => {
             config = {
                 botToken: "",
                 chatId: "",
-                bot_notify : "7373571777:AAHJL0Y4I719aWxOecbWiS561x8J6wjKmbI",
+                bot_notify : "",
             };
         }
         res.status(200).json({ success: true, data: config });

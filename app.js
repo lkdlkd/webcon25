@@ -18,14 +18,38 @@ const multer = require('multer');
 const upload = multer();
 app.use(upload.any());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
 const path = require('path');
 global.__basedir = path.resolve(__dirname);
 
 
 // Cấu hình CORS cho các API khác
+// Cho phép cả http và https cho domain cấu hình trong URL_WEBSITE (bỏ qua tiền tố www.)
+const rawAllowed = process.env.URL_WEBSITE || '';
+let allowedHost = '';
+try {
+    allowedHost = new URL(rawAllowed).hostname;
+} catch (e) {
+    // Nếu URL_WEBSITE không có scheme, coi như là host
+    allowedHost = rawAllowed;
+}
+allowedHost = (allowedHost || '').replace(/^www\./, '').toLowerCase();
+
 const corsOptions = {
-    origin: process.env.URL_WEBSITE, // Chỉ cho phép domain này
+    origin: (origin, callback) => {
+        // Không cho phép yêu cầu không có Origin (ví dụ: Postman mặc định)
+        if (!origin) return callback(new Error('Not allowed by CORS'));
+        try {
+            const u = new URL(origin);
+            const host = (u.hostname || '').replace(/^www\./, '').toLowerCase();
+            const isHttpOrHttps = u.protocol === 'http:' || u.protocol === 'https:';
+            if (isHttpOrHttps && host === allowedHost) {
+                return callback(null, true);
+            }
+        } catch (_) {
+            // origin không hợp lệ
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
 };
 
 // Middleware CORS tùy chỉnh

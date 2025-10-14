@@ -11,7 +11,7 @@ exports.getConfigweb = async (req, res) => {
         tieude: "",
         logo: "",
         favicon: "",
-        linktele: "https://t.me/noti_web_245_bot",
+        linktele: "",
         title: "",
         lienhe: [
           {
@@ -61,7 +61,7 @@ exports.updateConfigweb = async (req, res) => {
     config.favicon = favicon !== undefined ? favicon : "";
     config.lienhe = lienhe !== undefined ? lienhe : [];
     config.cuphap = cuphap !== undefined && cuphap.trim() !== "" ? cuphap : config.cuphap || "naptien"; // Kiểm tra giá trị trống cho cuphap
-    config.linktele = linktele !== undefined ? linktele : config.linktele || "https://t.me/noti_web_245_bot"; // Kiểm tra giá trị trống cho linktele
+    config.linktele = linktele !== undefined ? linktele : ""; // Kiểm tra giá trị trống cho linktele
 
     await config.save();
 
