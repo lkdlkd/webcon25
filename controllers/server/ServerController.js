@@ -242,10 +242,11 @@ exports.getServerByTypeAndPath = async (req, res) => {
     }
 
     // Lấy danh sách dịch vụ theo category._id và chỉ lấy dịch vụ đang hoạt động
-    let services = await Service.find({ category: category._id, isActive: true })
+    let services = await Service.find({ category: category._id })
       .populate("category", "name path thutu")
-      .populate("type", "name logo thutu");
-
+      .populate("type", "name logo thutu")
+      .sort("thutu");
+    // Thêm thông tin server vào từng dịch vụ
     // Sắp xếp theo thutu tăng dần
     services = services.sort((a, b) => {
       const sa = typeof a.thutu === 'number' ? a.thutu : 999999;
