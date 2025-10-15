@@ -1,4 +1,5 @@
 const SmmSv = require("../../models/SmmSv");
+const Service = require("../../models/server");
 const SmmApiService = require('../../controllers/Smm/smmServices'); // Đảm bảo đường dẫn đúng đến SmmApiService
 
 // Cấu hình giới hạn & timeout khi gọi balance từ đối tác
@@ -106,18 +107,58 @@ exports.getAllPartners = async (req, res) => {
     }
 };
 
-// Lấy thông tin một đối tác SMM theo ID
-exports.getPartnerById = async (req, res) => {
+// Cập nhật giá tất cả dịch vụ theo price_update của đối tác SMM (ID truyền vào)
+exports.updatePartnerPrices = async (req, res) => {
     try {
         const user = req.user;
         if (!user || user.role !== "admin") {
             return res.status(403).json({ error: "Chỉ admin mới có quyền sử dụng chức năng này" });
         }
-        const partner = await SmmSv.findById(req.params.id);
+
+        const id = req.params.id;
+        const partner = await SmmSv.findById(id);
         if (!partner) {
-            return res.status(404).json({ message: "Không tìm thấy đối tác SMM!" });
+            return res.status(404).json({ success: false, message: "Không tìm thấy đối tác SMM!" });
         }
-        res.status(200).json(partner);
+
+        const percent = Number(partner.price_update || 10);
+        const factor = 1 + (isFinite(percent) ? percent : 0) / 100;
+
+        // Lấy tất cả services thuộc đối tác này
+        const services = await Service.find({ DomainSmm: partner._id });
+        if (!services.length) {
+            return res.status(200).json({ success: false, message: "Không có dịch vụ nào thuộc đối tác này.", updated: 0 });
+        }
+
+        // Tính rate mới dựa trên originalRate và price_update
+        const ops = [];
+        let updated = 0;
+        for (const sv of services) {
+            const base = Number(sv.originalRate);
+            if (!isFinite(base) || base <= 0) continue;
+            const newRate = Math.round(base * factor * 10000) / 10000;
+            if (sv.rate !== newRate) {
+                ops.push({
+                    updateOne: {
+                        filter: { _id: sv._id },
+                        update: { $set: { rate: newRate } },
+                    },
+                });
+                updated++;
+            }
+        }
+
+        if (ops.length) {
+            await Service.bulkWrite(ops, { ordered: false });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Đã cập nhật giá theo phần trăm giá đối tác.",
+            partner: { id: partner._id.toString(), name: partner.name, price_update: partner.price_update },
+            totalServices: services.length,
+            updated,
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
