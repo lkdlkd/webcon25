@@ -7,6 +7,7 @@ const FormData = require("form-data");
 const cardModel = require("../../models/Card");
 const ConfigCard = require("../../models/ConfigCard"); // Import mô hình ConfigCard
 const Telegram = require('../../models/Telegram');
+const Configweb = require('../../models/Configweb');
 
 /**
  * Controller cập nhật trạng thái thẻ cào
@@ -111,6 +112,23 @@ exports.rechargeCardStatus = async () => {
                         userData.balance += chietkhau;
                         userData.tongnapthang = (userData.tongnapthang || 0) + chietkhau;
                         userData.tongnap = (userData.tongnap || 0) + chietkhau;
+
+                        // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
+                        try {
+                            const cfg = await Configweb.findOne();
+                            const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
+                            const distributorThreshold = Number(cfg?.distributor) || 0;
+                            if (userData.tongnap >= distributorThreshold) {
+                                userData.capbac = 'distributor';
+                            } else if (userData.tongnap >= vipThreshold) {
+                                userData.capbac = 'vip';
+                            } else {
+                                // giữ nguyên nếu chưa đạt ngưỡng
+                            }
+                        } catch (cfgErr) {
+                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
+                        }
+
                         await userData.save();
                         // Gửi thông báo Telegram nếu có cấu hình
                         const teleConfig = await Telegram.findOne();
@@ -118,7 +136,7 @@ exports.rechargeCardStatus = async () => {
                         if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
                             const adminChatId = teleConfig.chatId;
                             const adminbottoken = teleConfig.botToken;
-                            const userbotToken = teleConfig.bot_notify ;
+                            const userbotToken = teleConfig.bot_notify;
                             const telegramMessage =
                                 `📌 *NẠP TIỀN THẺ CÀO!*\n` +
                                 `👤 *Khách hàng:* ${card.username}\n` +
@@ -195,6 +213,23 @@ exports.rechargeCardStatus = async () => {
                         userData.balance += chietkhau2;
                         userData.tongnapthang = (userData.tongnapthang || 0) + chietkhau2;
                         userData.tongnap = (userData.tongnap || 0) + chietkhau2;
+
+                        // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
+                        try {
+                            const cfg = await Configweb.findOne();
+                            const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
+                            const distributorThreshold = Number(cfg?.distributor) || 0;
+                            if (userData.tongnap >= distributorThreshold) {
+                                userData.capbac = 'distributor';
+                            } else if (userData.tongnap >= vipThreshold) {
+                                userData.capbac = 'vip';
+                            } else {
+                                // giữ nguyên nếu chưa đạt ngưỡng
+                            }
+                        } catch (cfgErr) {
+                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
+                        }
+
                         await userData.save();
 
                         // Gửi thông báo Telegram nếu có cấu hình

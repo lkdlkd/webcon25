@@ -55,7 +55,7 @@ router.get('/servers', authenticate.authenticateUser, server.getServerByTypeAndP
 // admin services
 router.post('/smm/create', authenticate.authenticateAdmin, smm.createPartner); // ok Thêm mới đối tác SMM
 router.get('/smm', authenticate.authenticateAdmin, smm.getAllPartners); // ok Lấy danh sách tất cả đối tác SMM
-router.get('/smm/:id', authenticate.authenticateAdmin, smm.updatePartnerPrices); // ok Cập nhật giá tất cả dịch vụ theo price_update của đối tác SMM (ID truyền vào)
+router.post('/smm/:id', authenticate.authenticateAdmin, smm.updatePartnerPrices); // ok Cập nhật giá tất cả dịch vụ theo price_update của đối tác SMM (ID truyền vào)
 router.put('/smm/update/:id', authenticate.authenticateAdmin, smm.updatePartner); // ok Cập nhật thông tin đối tác SMM
 router.delete('/smm/delete/:id', authenticate.authenticateAdmin, smm.deletePartner); // ok Xóa đối tác SMM
 // admin server

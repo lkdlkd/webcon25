@@ -63,6 +63,8 @@ async function updateServicePrices() {
             }
             const apiRate = apiService.rate * smmSvConfig.tigia;
             const dbRate = serviceItem.rate;
+            const dbRateVip = serviceItem.ratevip;
+            const dbRateDistributor = serviceItem.rateDistributor;
             const previousOriginal = typeof serviceItem.originalRate === 'number' ? serviceItem.originalRate : apiRate;
             // const direction = apiRate > previousOriginal ? 'GIẢM' : 'TĂNG';
             let direction;
@@ -70,20 +72,27 @@ async function updateServicePrices() {
               direction = 'TĂNG';
             } else if (apiRate < previousOriginal) {
               direction = 'GIẢM';
-            }else {
-              direction = 'KHÔNG ĐỔI';
+            } else {
+              direction = '!';
             }
             // console.log(`Kiểm tra dịch vụ: ${serviceItem.name} - Giá API: ${apiRate}, Giá CSDL: ${dbRate}`);
             // So sánh và cập nhật giá
             if (
               typeof serviceItem.originalRate === 'number' &&
-              dbRate < apiRate &&
+              (dbRate < apiRate || dbRateVip < apiRate || dbRateDistributor < apiRate) &&
               smmSvConfig.update_price === "on"
             ) {
               let newRate = apiRate * (1 + Number(smmSvConfig.price_update) / 100); // cập nhật với tỷ lệ tăng đã cấu hình
               newRate = Math.round(newRate * 10000) / 10000; // Làm tròn 4 chữ số thập phân
+              let newDistributor = newRate; // Giá Distributor cao hơn giá thường 10%
+              let newVip = newDistributor * 1.1; // Giá VIP cao hơn giá thường 20%
+              newVip = Math.round(newVip * 10000) / 10000; // Làm tròn 4 chữ số thập phân
+              let newmember = newVip * 1.15; // Giá Member cao hơn giá thường 15%
+              newmember = Math.round(newmember * 10000) / 10000; // Làm tròn 4 chữ số thập phân              
               const oldRate = serviceItem.rate;
-              serviceItem.rate = newRate;
+              serviceItem.rate = newmember;
+              serviceItem.ratevip = newVip;
+              serviceItem.rateDistributor = newDistributor;
               await serviceItem.save();
               // console.log(`Đã cập nhật giá của ${serviceItem.name} thành ${newRate}`);
 
@@ -94,7 +103,9 @@ async function updateServicePrices() {
                 const telegramMessage = `📌 *Cập nhật giá ${direction}!*\n` +
                   `👤 *Dịch vụ:* ${serviceItem.name}\n` +
                   `🔹 *Giá cũ:* ${oldRate}\n` +
-                  `🔹 *Giá mới:* ${newRate}\n` +
+                  `🔹 *Giá Thành Viên:* ${newmember}\n` +
+                  `🔹 *Giá Đại Lý:* ${newVip}\n` +
+                  `🔹 *Giá Nhà Phân Phối:* ${newDistributor}\n` +
                   `🔹 *Giá cũ API :* ${Math.round(previousOriginal * 10000) / 10000}\n` +
                   `🔹 *Giá mới API :* ${Math.round(apiRate * 10000) / 10000}\n` +
                   `🔹 *Nguồn:* ${smmSvConfig.name}\n` +
@@ -124,10 +135,17 @@ async function updateServicePrices() {
               apiRate < serviceItem.originalRate &&
               smmSvConfig.update_price === "on"
             ) {
-              let newRate = apiRate * (1 + Number(smmSvConfig.price_update) / 100);
-              newRate = Math.round(newRate * 10000) / 10000;
+              let newRate = apiRate * (1 + Number(smmSvConfig.price_update) / 100); // cập nhật với tỷ lệ tăng đã cấu hình
+              newRate = Math.round(newRate * 10000) / 10000; // Làm tròn 4 chữ số thập phân
+              let newDistributor = newRate; // Giá Distributor cao hơn giá thường 10%
+              let newVip = newDistributor * 1.1; // Giá VIP cao hơn giá thường 20%
+              newVip = Math.round(newVip * 10000) / 10000; // Làm tròn 4 chữ số thập phân
+              let newmember = newVip * 1.15; // Giá Member cao hơn giá thường 15%
+              newmember = Math.round(newmember * 10000) / 10000; // Làm tròn 4 chữ số thập phân              
               const oldRate = serviceItem.rate;
-              serviceItem.rate = newRate;
+              serviceItem.rate = newmember;
+              serviceItem.ratevip = newVip;
+              serviceItem.rateDistributor = newDistributor;
               await serviceItem.save();
               // console.log(`Đã giảm giá của ${serviceItem.name} thành ${newRate}`);
 
@@ -138,7 +156,9 @@ async function updateServicePrices() {
                 const telegramMessage = `📌 *Cập nhật giá ${direction}!*\n` +
                   `👤 *Dịch vụ:* ${serviceItem.name}\n` +
                   `🔹 *Giá cũ:* ${oldRate}\n` +
-                  `🔹 *Giá mới:* ${newRate}\n` +
+                  `🔹 *Giá Thành Viên:* ${newmember}\n` +
+                  `🔹 *Giá Đại Lý:* ${newVip}\n` +
+                  `🔹 *Giá Nhà Phân Phối:* ${newDistributor}\n` +
                   `🔹 *Giá cũ API :* ${Math.round(previousOriginal * 10000) / 10000}\n` +
                   `🔹 *Giá mới API :* ${Math.round(apiRate * 10000) / 10000}\n` +
                   `🔹 *Nguồn:* ${smmSvConfig.name}\n` +

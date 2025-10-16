@@ -5,6 +5,21 @@ const User = require('../../models/User');
 // Thêm dịch vụ mới (chỉ admin)
 const Counter = require("../../models/Counter "); // Import model Counter
 
+// Helper: lấy đơn giá theo cấp bậc user (member/vip)
+function getEffectiveRate(service, user) {
+  try {
+    const base = Number(service?.rate || 0);
+    const vip = Number(service?.ratevip || 0);
+    const distributor = Number(service?.rateDistributor || 0);
+    const level = (user?.capbac || 'member').toLowerCase();
+    if (level === 'vip' && vip > 0) return vip;
+    if (level === 'distributor' && distributor > 0) return distributor;
+    return base;
+  } catch (_) {
+    return Number(service?.rate || 0);
+  }
+}
+
 exports.addServer = async (req, res) => {
   try {
     const user = req.user;
@@ -23,9 +38,24 @@ exports.addServer = async (req, res) => {
     if (typeof rate === 'number') {
       rate = Math.round(rate * 10000) / 10000;
     }
+    let ratevip = req.body.ratevip;
+    if (typeof ratevip === 'number') {
+      ratevip = Math.round(ratevip * 10000) / 10000;
+    } else {
+      ratevip = rate; // Nếu không có ratevip, gán bằng rate thường
+    }
+    // Tính rateDistributor: ưu tiên body, nếu không có thì theo ratevip, sau đó rate
+    let rateDistributor = req.body.rateDistributor;
+    if (typeof rateDistributor === 'number') {
+      rateDistributor = Math.round(rateDistributor * 10000) / 10000;
+    } else {
+      rateDistributor = rate;
+    }
     const newService = new Service({
       ...req.body,
       rate,
+      ratevip,
+      rateDistributor,
       Magoi: counter.value, // Gán giá trị Magoi từ bộ đếm
     });
 
@@ -104,6 +134,8 @@ exports.getServer = async (req, res) => {
         // Tránh lỗi khi category có thể không tồn tại
         path: service.category?.path || "",
         rate: service.rate,
+        ratevip: service.ratevip,
+        rateDistributor: service.rateDistributor,
         maychu: service.maychu,
         min: service.min,
         max: service.max,
@@ -161,7 +193,7 @@ exports.getServer = async (req, res) => {
         reaction: service.reaction,
         matlive: service.matlive,
         name: service.name,
-        rate: service.rate,
+        rate: getEffectiveRate(service, user),
         min: service.min,
         max: service.max,
         type: service.type ? service.type.name : "không xác định",
@@ -197,6 +229,16 @@ exports.updateServer = async (req, res) => {
     if (typeof updateData.rate === 'number') {
       updateData.rate = Math.round(updateData.rate * 10000) / 10000;
     }
+    if (typeof updateData.ratevip === 'number') {
+      updateData.ratevip = Math.round(updateData.ratevip * 10000) / 10000;
+    } else if (typeof updateData.rate === 'number') {
+      updateData.ratevip = updateData.rate; // Nếu không có ratevip, gán bằng rate thường
+    }
+    if (typeof updateData.rateDistributor === 'number') {
+      updateData.rateDistributor = Math.round(updateData.rateDistributor * 10000) / 10000;
+    } else if (typeof updateData.rate === 'number') {
+      updateData.rateDistributor = updateData.rate; // Nếu không có rateDistributor, gán bằng rate thường
+    }
     const updatedService = await Service.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!updatedService) {
       return res.status(404).json({ success: false, message: 'Dịch vụ không tồn tại' });
@@ -228,6 +270,7 @@ exports.deleteServer = async (req, res) => {
 exports.getServerByTypeAndPath = async (req, res) => {
   try {
     const { path } = req.query;
+    const user = req.user || null;
 
     if (!path) {
       return res.status(400).json({ success: false, message: "Thiếu tham số path" });
@@ -260,7 +303,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
       id: service.id,
       maychu: service.maychu,
       name: service.name,
-      rate: service.rate,
+      rate: getEffectiveRate(service, user),
       min: service.min,
       max: service.max,
       getid: service.getid,

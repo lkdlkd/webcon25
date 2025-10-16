@@ -14,6 +14,8 @@ const serviceSchema = new mongoose.Schema({
   Magoi: { type: String, required: true },// ma goi moi khi them
   name: { type: String, required: true },// tăng like tiktok, tăng view titkok
   rate: { type: Number, required: true },//giá lấy bên thứ 3* với smmPartner.price_update,
+  ratevip: { type: Number, required: false },//giá vip
+  rateDistributor: { type: Number, required: false },//giá distributor
   maychu: { type: String, required: false },//sv1
   min: { type: Number, required: true },//min lấy bên thứ 3
   max: { type: Number, required: true },//max lấy bên thứ 3

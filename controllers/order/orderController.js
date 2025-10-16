@@ -6,6 +6,20 @@ const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // hoặc đường dẫn tương ứng
 const Telegram = require('../../models/Telegram');
 
+// Helper: lấy đơn giá theo cấp bậc user (member/vip)
+function getEffectiveRate(service, user) {
+  try {
+    const base = Number(service?.rate || 0);
+    const vip = Number(service?.ratevip || 0);
+    const distributor = Number(service?.rateDistributor || 0);
+    const level = (user?.capbac || 'member').toLowerCase();
+    if (level === 'vip' && vip > 0) return vip;
+    if (level === 'distributor' && distributor > 0) return distributor;
+    return base;
+  } catch (_) {
+    return Number(service?.rate || 0);
+  }
+}
 // Lấy đơn hàng theo category, user, và từ khóa tìm kiếm (phân trang)
 async function getOrders(req, res) {
   const user = req.user;
@@ -148,9 +162,10 @@ async function addOrder(req, res) {
     // );
 
     // Kiểm tra số dư và số lượng
-    const totalCost = serviceFromDb.rate * qty;
-    const apiRate = serviceFromDb.originalRate; // Giờ lấy từ database luôn
-    if (apiRate > serviceFromDb.rate) {
+    const rateForUser = getEffectiveRate(serviceFromDb, user);
+    const totalCost = rateForUser * qty;
+    const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
+    if (apiRate > rateForUser) {
       throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
     }
     if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
@@ -264,7 +279,7 @@ async function addOrder(req, res) {
       link,
       start: 0,
       quantity: qty,
-      rate: serviceFromDb.rate,
+      rate: rateForUser,
       totalCost,
       status: 'Pending',
       note,
@@ -302,7 +317,7 @@ async function addOrder(req, res) {
         `🆔 *Mã đơn:* ${newMadon}\n` +
         `🔹 *Dịch vụ:* ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
         `🔗 *Link:* ${link}\n` +
-        `🔸 *Rate:* ${serviceFromDb.rate}\n` +
+        `🔸 *Rate:* ${rateForUser}\n` +
         `📌 *Số lượng:* ${qty}\n` +
         `💰 *Tiền cũ:* ${Number(Math.floor(Number(user.balance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
         `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +

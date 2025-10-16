@@ -154,6 +154,22 @@ cron.schedule('*/30 * * * * *', async () => {
                             user.tongnap = (user.tongnap || 0) + totalAmount;
                             user.tongnapthang = (user.tongnapthang || 0) + totalAmount;
 
+                            // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
+                            try {
+                                const cfg = await Configweb.findOne();
+                                const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
+                                const distributorThreshold = Number(cfg?.distributor) || 0;
+                                if (user.tongnap >= distributorThreshold) {
+                                    user.capbac = 'distributor';
+                                } else if (user.tongnap >= vipThreshold) {
+                                    user.capbac = 'vip';
+                                } else {
+                                    // giữ nguyên nếu chưa đạt ngưỡng
+                                }
+                            } catch (cfgErr) {
+                                console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
+                            }
+
                             // Lưu lịch sử giao dịch
                             const historyData = new HistoryUser({
                                 username,

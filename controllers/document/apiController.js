@@ -8,6 +8,21 @@ const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // Giả sử bạn có một lớp để xử lý API SMM
 const Telegram = require('../../models/Telegram');
 
+// Helper: lấy đơn giá theo cấp bậc user
+function getEffectiveRate(service, user) {
+    try {
+        const base = Number(service?.rate || 0);
+        const vip = Number(service?.ratevip || 0);
+        const distributor = Number(service?.rateDistributor || 0);
+        const level = (user?.capbac || 'member').toLowerCase();
+        if (level === 'vip' && vip > 0) return vip;
+        if (level === 'distributor' && distributor > 0) return distributor;
+        return base;
+    } catch (_) {
+        return Number(service?.rate || 0);
+    }
+}
+
 /* Hàm lấy danh sách dịch vụ */
 exports.getServices = async (req, res) => {
     try {
@@ -40,19 +55,22 @@ exports.getServices = async (req, res) => {
         const services = await Service.find({ isActive: true })
             .populate("category", "name")
             .populate("type", "name"); // Lấy thông tin của Platform
-        // Định dạng các trường cần hiển thị
-        const formattedServices = services.map(service => ({
-            service: Number(service.Magoi),
-            name: `${service.maychu} ${service.name}`,
-            type: service.comment === "on" ? "Custom Comments" : "Default",
-            platform: service.type?.name || "không xác định",
-            category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
-            rate: service.rate / 25,
-            min: service.min,
-            max: service.max,
-            cancel: service.cancel === "on",
-            refill: service.refil === "on",
-        }));
+        // Định dạng các trường cần hiển thị với giá theo cấp bậc
+        const formattedServices = services.map(service => {
+            const rateForUser = getEffectiveRate(service, user);
+            return {
+                service: Number(service.Magoi),
+                name: `${service.maychu} ${service.name}`,
+                type: service.comment === "on" ? "Custom Comments" : "Default",
+                platform: service.type?.name || "không xác định",
+                category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
+                rate: rateForUser / 25,
+                min: service.min,
+                max: service.max,
+                cancel: service.cancel === "on",
+                refill: service.refil === "on",
+            };
+        });
 
         return res.status(200).json(formattedServices);
     } catch (error) {
@@ -119,9 +137,10 @@ exports.AddOrder = async (req, res) => {
 
 
         // Tính tổng chi phí và làm tròn 2 số thập phân
-        const totalCost = serviceFromDb.rate * qty; // Kết quả: 123.4
-        const apiRate = serviceFromDb.originalRate; // Giờ lấy từ database luôn
-        if (apiRate > serviceFromDb.rate) {
+        const rateForUser = getEffectiveRate(serviceFromDb, user);
+        const totalCost = rateForUser * qty; // Kết quả: 123.4
+        const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
+        if (apiRate > rateForUser) {
             throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
             // return res.status(400).json({ error: 'Lỗi khi mua dịch vụ, vui lòng ib admin' });
         }
@@ -246,7 +265,7 @@ exports.AddOrder = async (req, res) => {
             link,
             start: 0,
             quantity: qty,
-            rate: serviceFromDb.rate,
+            rate: rateForUser,
             totalCost,
             createdAt,
             ObjectLink: objectLinkForStore || link,
@@ -287,7 +306,7 @@ exports.AddOrder = async (req, res) => {
                 `🆔 *Mã đơn:* ${newMadon}\n` +
                 `🔹 *Dịch vụ:* ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
                 `🔗 *Link:* ${link}\n` +
-                `🔸 *Rate:* ${serviceFromDb.rate}\n` +
+                `🔸 *Rate:* ${rateForUser}\n` +
                 `📌 *Số lượng:* ${qty}\n` +
                 `💰 *Tiền cũ:* ${Number(Math.floor(Number(user.balance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
                 `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +

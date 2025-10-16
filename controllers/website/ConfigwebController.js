@@ -13,6 +13,8 @@ exports.getConfigweb = async (req, res) => {
         favicon: "",
         linktele: "",
         title: "",
+        daily: 1000000,
+        distributor: 10000000,
         lienhe: [
           {
             type: "",
@@ -39,7 +41,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -57,7 +59,8 @@ exports.updateConfigweb = async (req, res) => {
     config.tieude = tieude !== undefined ? tieude : "";
     config.title = title !== undefined ? title : "";
     config.logo = logo !== undefined ? logo : "";
-    
+    config.daily = daily !== undefined ? daily : 1000000;
+    config.distributor = distributor !== undefined ? distributor : 10000000;
     config.favicon = favicon !== undefined ? favicon : "";
     config.lienhe = lienhe !== undefined ? lienhe : [];
     config.cuphap = cuphap !== undefined && cuphap.trim() !== "" ? cuphap : config.cuphap || "naptien"; // Kiểm tra giá trị trống cho cuphap

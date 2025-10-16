@@ -1,6 +1,7 @@
 const SmmSv = require("../../models/SmmSv");
 const Service = require("../../models/server");
 const SmmApiService = require('../../controllers/Smm/smmServices'); // Đảm bảo đường dẫn đúng đến SmmApiService
+const { request } = require("express");
 
 // Cấu hình giới hạn & timeout khi gọi balance từ đối tác
 const BALANCE_CONCURRENCY = 3; // Số request song song tối đa
@@ -120,10 +121,17 @@ exports.updatePartnerPrices = async (req, res) => {
         if (!partner) {
             return res.status(404).json({ success: false, message: "Không tìm thấy đối tác SMM!" });
         }
+        // Parse tỉ lệ điều chỉnh từ body (%, có thể âm/dương), default = 0
+        const adjustMemberPctNum = Number(req.body.adjustMemberPct);
+        const adjustAgentPctNum = Number(req.body.adjustAgentPct);
+        const adjustDistributorPctNum = Number(req.body.adjustDistributorPct);
+        const memberPct = Number.isFinite(adjustMemberPctNum) ? adjustMemberPctNum : 0;
+        const agentPct = Number.isFinite(adjustAgentPctNum) ? adjustAgentPctNum : 0;
+        const distributorPct = Number.isFinite(adjustDistributorPctNum) ? adjustDistributorPctNum : 0;
 
-        const percent = Number(partner.price_update || 10);
-        const factor = 1 + (isFinite(percent) ? percent : 0) / 100;
-
+        const memberFactor = 1 + memberPct / 100;
+        const agentFactor = 1 + agentPct / 100;
+        const distributorFactor = 1 + distributorPct / 100;
         // Lấy tất cả services thuộc đối tác này
         const services = await Service.find({ DomainSmm: partner._id });
         if (!services.length) {
@@ -131,20 +139,44 @@ exports.updatePartnerPrices = async (req, res) => {
         }
 
         // Tính rate mới dựa trên originalRate và price_update
+        // Đồng thời cập nhật ratevip theo cùng factor để giữ tỉ lệ VIP nếu có
         const ops = [];
         let updated = 0;
+        let updatedVip = 0;
+        let updatedDistributor = 0;
         for (const sv of services) {
             const base = Number(sv.originalRate);
             if (!isFinite(base) || base <= 0) continue;
-            const newRate = Math.round(base * factor * 10000) / 10000;
-            if (sv.rate !== newRate) {
+            const newRate = Math.round(base * 10000) / 10000;
+            // Tính rateDistributor mới (giá đại lý) theo cùng factor, fallback rate mới
+            let newRateDistributor = newRate;
+            newRateDistributor = Math.round(Number(newRateDistributor) * distributorFactor * 10000) / 10000;
+            // Tính ratevip mới dựa trên ratevip hiện tại (nếu > 0) để giữ khoảng cách VIP
+            let newRateVip = newRate;
+            newRateVip = Math.round(Number(newRateVip) * agentFactor * 10000) / 10000;
+            let newrateMember = newRate;
+            newrateMember = Math.round(Number(newrateMember) * memberFactor * 10000) / 10000;
+
+            const $set = {};
+            if (sv.rate !== newrateMember) {
+                $set.rate = newrateMember;
+                updated++;
+            }
+            if (sv.ratevip !== newRateVip) {
+                $set.ratevip = newRateVip;
+                updatedVip++;
+            }
+            if (sv.rateDistributor !== newRateDistributor) {
+                $set.rateDistributor = newRateDistributor;
+                updatedDistributor++;
+            }
+            if (Object.keys($set).length) {
                 ops.push({
                     updateOne: {
                         filter: { _id: sv._id },
-                        update: { $set: { rate: newRate } },
+                        update: { $set },
                     },
                 });
-                updated++;
             }
         }
 
@@ -154,10 +186,17 @@ exports.updatePartnerPrices = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Đã cập nhật giá theo phần trăm giá đối tác.",
-            partner: { id: partner._id.toString(), name: partner.name, price_update: partner.price_update },
+            message: "Đã cập nhật giá theo phần trăm yêu cầu.",
+            partner: { id: partner._id.toString(), name: partner.name },
+            applied: {
+                adjustMemberPct: memberPct,
+                adjustAgentPct: agentPct,
+                adjustDistributorPct: distributorPct,
+            },
             totalServices: services.length,
-            updated,
+            updatedRate: updated,
+            updatedRateVip: updatedVip,
+            updatedRateDistributor: updatedDistributor,
         });
     } catch (error) {
         res.status(500).json({ error: error.message });

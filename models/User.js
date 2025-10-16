@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
   tongnap: { type: Number, default: 0 },
   tongnapthang: { type: Number, default: 0 },
   apiKey: { type: String }, // Không cần required, sẽ cập nhật sau khi tạo token
-  capbac: { type: String, default: "Thành viên" },
+  capbac: { type: String, enum: ['member', 'vip', 'distributor'], default: 'member' },
   status: { type: String, enum: ['active', 'banned'], default: 'active' },
   loginHistory: [
     {

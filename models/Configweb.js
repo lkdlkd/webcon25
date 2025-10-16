@@ -7,6 +7,8 @@ const configwebSchema = new mongoose.Schema({
   favicon: { type: String, default: "" },
   linktele: { type: String, default: "" },
   cuphap: { type: String, default: "naptien" },
+  daily: {type : Number, default: 1000000}, // hoa hồng đại lý
+  distributor: {type : Number, default: 10000000}, // hoa hồng nhà phân phối
   lienhe: [
     {
       type: { type: String, default: "" },
