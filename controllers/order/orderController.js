@@ -165,7 +165,8 @@ async function addOrder(req, res) {
     const rateForUser = getEffectiveRate(serviceFromDb, user);
     const totalCost = rateForUser * qty;
     const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
-    if (apiRate > rateForUser) {
+    // Chỉ kiểm tra giá nếu ischeck = true
+    if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
       throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
     }
     if (qty < serviceFromDb.min || qty > serviceFromDb.max) {

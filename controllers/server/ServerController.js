@@ -152,6 +152,7 @@ exports.getServer = async (req, res) => {
         logo: service.type ? service.type.logo : "",
         refil: service.refil,
         cancel: service.cancel,
+        ischeck: service.ischeck,
       }));
 
       return res.status(200).json({
@@ -194,6 +195,8 @@ exports.getServer = async (req, res) => {
         matlive: service.matlive,
         name: service.name,
         rate: getEffectiveRate(service, user),
+        ratevip: service.ratevip,
+        rateDistributor: "x",
         min: service.min,
         max: service.max,
         type: service.type ? service.type.name : "không xác định",

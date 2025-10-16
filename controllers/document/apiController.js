@@ -140,9 +140,9 @@ exports.AddOrder = async (req, res) => {
         const rateForUser = getEffectiveRate(serviceFromDb, user);
         const totalCost = rateForUser * qty; // Kết quả: 123.4
         const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
-        if (apiRate > rateForUser) {
+        // Chỉ kiểm tra giá nếu ischeck = true
+        if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
             throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
-            // return res.status(400).json({ error: 'Lỗi khi mua dịch vụ, vui lòng ib admin' });
         }
 
         if (!serviceFromDb.isActive) {

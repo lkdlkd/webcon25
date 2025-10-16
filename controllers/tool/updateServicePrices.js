@@ -76,8 +76,25 @@ async function updateServicePrices() {
               direction = '!';
             }
             // console.log(`Kiểm tra dịch vụ: ${serviceItem.name} - Giá API: ${apiRate}, Giá CSDL: ${dbRate}`);
-            // So sánh và cập nhật giá
-            if (
+
+            // Nếu service có ischeck = true, chỉ cập nhật originalRate mà không cập nhật giá
+            if (serviceItem.ischeck === true) {
+              let needUpdate = false;
+              if (typeof serviceItem.originalRate !== 'number' || serviceItem.originalRate !== apiRate) {
+                serviceItem.originalRate = apiRate;
+                needUpdate = true;
+              }
+              if (serviceItem.serviceName !== apiService.name) {
+                serviceItem.serviceName = apiService.name;
+                needUpdate = true;
+              }
+              if (needUpdate) {
+                await serviceItem.save();
+              }
+              console.log(`Service ${serviceItem.name} có ischeck=true, chỉ cập nhật originalRate mà không cập nhật giá.`);
+            }
+            // So sánh và cập nhật giá (chỉ khi ischeck != true)
+            else if (
               typeof serviceItem.originalRate === 'number' &&
               (dbRate < apiRate || dbRateVip < apiRate || dbRateDistributor < apiRate) &&
               smmSvConfig.update_price === "on"

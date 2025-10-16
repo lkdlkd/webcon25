@@ -30,6 +30,7 @@ const serviceSchema = new mongoose.Schema({
   comment: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   reaction: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   matlive: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
+  ischeck: { type: Boolean, default: false }, // đã kiểm tra dịch vụ
   isActive: { type: Boolean, default: true }, // Hiển thị hoặc ẩn dịch vụ
   domain: { type: String, default: null },
 }, { timestamps: true }); // Thêm createdAt và updatedAt tự động
@@ -120,5 +121,10 @@ serviceSchema.statics.updateTocDoDuKien = async function (magoi) {
   return avgSpeedStr;
 };
 
+// // Migration script (optional)
+// await Service.updateMany(
+//     { DomainSmm: { $type: "string" } }, // Tìm những cái là string
+//     [{ $set: { DomainSmm: { $toObjectId: "$DomainSmm" } } }] // Convert sang ObjectId
+// ); 
 
 module.exports = mongoose.model('Service', serviceSchema);
