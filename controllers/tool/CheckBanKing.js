@@ -9,7 +9,7 @@ const Telegram = require('../../models/Telegram');
 
 // Hàm tạo URL API tương ứng với loại ngân hàng
 function getBankApiUrl(bank) {
-    const { code , bank_password, account_number, token, url_api } = bank;
+    const { code, bank_password, account_number, token, url_api } = bank;
 
     if (!url_api) return null;
 
@@ -83,13 +83,13 @@ async function calculateBonus(amount) {
         return 0; // Không áp dụng khuyến mãi
     }
 
-    console.log(`🎉 Chương trình khuyến mãi: ${promo.name} - Tỷ lệ: ${promo.percentBonus}%`);
+    // console.log(`🎉 Chương trình khuyến mãi: ${promo.name} - Tỷ lệ: ${promo.percentBonus}%`);
     const bonus = Math.floor((amount * promo.percentBonus) / 100);
     return { bonus, promo }; // Trả về tiền thưởng và tỷ lệ khuyến mãi
 }
 
 // Cron job mỗi phút
-cron.schedule('*/30 * * * * *', async () => {
+cron.schedule('*/15 * * * * *', async () => {
     console.log('⏳ Đang chạy cron job...');
 
     try {
@@ -116,7 +116,11 @@ cron.schedule('*/30 * * * * *', async () => {
 
                 for (const trans of transactions) {
                     // Xử lý mọi giao dịch, không chỉ IN
-                    const exists = await Transaction.findOne({ transactionID: trans.transactionID });
+                    const exists = await Transaction.findOne({
+                        transactionID: trans.transactionID,
+                        typeBank: bank.bank_name,
+                        accountNumber: bank.account_number
+                    });
                     if (exists) {
                         console.log(`⚠️ Giao dịch đã tồn tại: ${trans.transactionID}`);
                         continue; // Bỏ qua nếu giao dịch đã được xử lý
@@ -128,150 +132,154 @@ cron.schedule('*/30 * * * * *', async () => {
                     let bonus = 0;
                     let totalAmount = 0;
                     let promo = null;
-                    const amount = parseFloat(trans.amount); // Chuyển đổi amount từ chuỗi sang số
+                    const amount = parseFloat(trans.amount); // Đảm bảo là Number
 
                     if (trans.type === 'IN' && username) {
-                        // Tìm user theo username
                         user = await User.findOne({ username });
-
-                        // Cập nhật số dư người dùng và tổng số tiền nạp
                         if (user) {
-                            const tiencu = user.balance;
-                            // Tính tiền thưởng khuyến mãi (nếu có)
                             const bonusResult = await calculateBonus(amount);
-                            bonus = bonusResult.bonus || 0; // Lấy tiền thưởng từ kết quả, nếu không có thì mặc định là 0
-                            promo = bonusResult.promo; // Assign promo here
+                            bonus = bonusResult.bonus || 0;
+                            promo = bonusResult.promo;
                             totalAmount = amount + bonus;
                             console.log(bonusResult);
-                            console.log(`Tính toán thành công: Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
-
                             console.log(`Giao dịch: ${trans.transactionID}, Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
-
-                            // Cập nhật số dư người dùng
-                            user.balance += totalAmount;
-
-                            // Cập nhật tổng số tiền nạp
-                            user.tongnap = (user.tongnap || 0) + totalAmount;
-                            user.tongnapthang = (user.tongnapthang || 0) + totalAmount;
-
-                            // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
-                            try {
-                                const cfg = await Configweb.findOne();
-                                const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
-                                const distributorThreshold = Number(cfg?.distributor) || 0;
-                                if (user.tongnap >= distributorThreshold) {
-                                    user.capbac = 'distributor';
-                                } else if (user.tongnap >= vipThreshold) {
-                                    user.capbac = 'vip';
-                                } else {
-                                    // giữ nguyên nếu chưa đạt ngưỡng
-                                }
-                            } catch (cfgErr) {
-                                console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
-                            }
-
-                            // Lưu lịch sử giao dịch
-                            const historyData = new HistoryUser({
-                                username,
-                                madon: "null",
-                                hanhdong: "Cộng tiền",
-                                link: "",
-                                tienhientai: tiencu,
-                                tongtien: totalAmount,
-                                tienconlai: user.balance,
-                                createdAt: new Date(),
-                                mota: bonus > 0
-                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${totalAmount} và áp dụng khuyến mãi ${promo.percentBonus}%`
-                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${totalAmount}`,
-                            });
-                            await historyData.save();
-                            await user.save();
-                            // **Thông báo qua Telegram**
-                            // Lấy cấu hình Telegram từ DB
-                            const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
-                            const teleConfig = await Telegram.findOne();
-                            if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
-                                const adminChatId = teleConfig.chatId;
-                                const adminbottoken = teleConfig.botToken;
-                                const userbotToken = teleConfig.bot_notify;
-                                const telegramMessage =
-                                    `📌 *NẠP TIỀN THÀNH CÔNG!*\n` +
-                                    `📌 *Trans_id:* ${trans.transactionID || "khong co"}\n` +
-                                    `👤 *Khách hàng:* ${username}\n` +
-                                    `💰 *Số tiền nạp:* ${amount.toLocaleString()}\n` +
-                                    `🎁 *Khuyến mãi:* ${bonus}\n` +
-                                    `🔹 *Tổng cộng:* ${totalAmount.toLocaleString()}\n` +
-                                    `🔹 *Số dư:* ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
-                                    `⏰ *Thời gian:* ${taoluc.toLocaleString("vi-VN", {
-                                        day: "2-digit",
-                                        month: "2-digit",
-                                        year: "numeric",
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                        second: "2-digit",
-                                    })}\n`;
-                                try {
-                                    // Gửi cho kênh/quản trị (admin)
-                                    if (adminChatId) {
-                                        await axios.post(`https://api.telegram.org/bot${adminbottoken}/sendMessage`, {
-                                            chat_id: adminChatId,
-                                            text: telegramMessage,
-                                            parse_mode: "Markdown",
-                                        });
-                                    }
-                                    // Gửi riêng cho user nếu có liên kết telegramChatId
-                                    if (user.telegramChatId) {
-                                        const userMessage =
-                                            `🎉 Bạn vừa nạp tiền thành công!\n` +
-                                            `💰 Số tiền: ${amount.toLocaleString()}\n` +
-                                            (bonus > 0 ? `🎁 Khuyến mãi: +${bonus.toLocaleString()}\n` : '') +
-                                            `🔹 Tổng cộng: ${totalAmount.toLocaleString()}\n` +
-                                            `💼 Số dư mới: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
-                                            `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
-                                                day: "2-digit", month: "2-digit", year: "numeric",
-                                                hour: "2-digit", minute: "2-digit", second: "2-digit",
-                                            })}`;
-                                        await axios.post(`https://api.telegram.org/bot${userbotToken}/sendMessage`, {
-                                            chat_id: user.telegramChatId,
-                                            text: userMessage,
-                                        });
-                                    }
-                                    console.log("Thông báo Telegram đã được gửi.");
-                                } catch (telegramError) {
-                                    console.error("Lỗi gửi thông báo Telegram:", telegramError.message);
-                                }
-                            }
                         } else {
                             console.log(`⚠️ Không tìm thấy user: ${username}`);
                         }
                     } else if (trans.type !== 'IN') {
-                        // Nếu là OUT hoặc loại khác, chỉ lưu giao dịch, không cộng tiền
                         if (!username) {
                             console.log(`⚠️ Không tìm thấy username trong mô tả: ${trans.description}`);
                         }
                     }
-                    datetime = new Date().toISOString(); // Lấy thời gian hiện tại
-                    // Xác định trạng thái giao dịch
+
+                    // 2) Ghi nhận giao dịch với upsert theo bộ khóa duy nhất
+                    const datetime = new Date().toISOString();
                     const transactionStatus = (trans.type === 'IN' && user) ? 'COMPLETED' : 'FAILED';
-
-                    // Lưu giao dịch vào bảng Transaction
-                    await Transaction.create({
-                        typeBank: bank.bank_name, // Lưu tên ngân hàng
+                    const filter = {
+                        typeBank: bank.bank_name,
+                        accountNumber: bank.account_number,
                         transactionID: trans.transactionID,
-                        username: username || "unknown", // Lưu "unknown" nếu không tìm thấy username
-                        amount: trans.amount, // Lưu số tiền đã chuyển đổi
-                        description: trans.description,
-                        transactionDate: datetime,
-                        type: trans.type,
-                        status: transactionStatus, // Trạng thái giao dịch
-                        note: (trans.type === 'IN' && user)
-                            ? (bonus > 0
-                                ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${trans.amount} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${trans.amount}`)
-                            : `Hệ thống ${bank.bank_name} không thể cộng tiền vì không tìm thấy người dùng hoặc không phải giao dịch nạp tiền`,
-                    });
+                    };
+                    const noteText = (trans.type === 'IN' && user)
+                        ? (bonus > 0
+                            ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${amount} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                            : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${amount}`)
+                        : `Hệ thống ${bank.bank_name} không thể cộng tiền vì không tìm thấy người dùng hoặc không phải giao dịch nạp tiền`;
 
+                    const upsertResult = await Transaction.updateOne(
+                        filter,
+                        {
+                            $setOnInsert: {
+                                typeBank: bank.bank_name,
+                                accountNumber: bank.account_number,
+                                transactionID: trans.transactionID,
+                                username: username || "unknown",
+                                amount: amount,
+                                description: trans.description,
+                                transactionDate: trans.transactionDate,
+                                type: trans.type,
+                                status: transactionStatus,
+                                note: noteText,
+                            },
+                        },
+                        { upsert: true }
+                    );
+
+                    const inserted = (upsertResult.upsertedCount && upsertResult.upsertedCount > 0) || upsertResult.upsertedId;
+                    if (!inserted) {
+                        console.log(`⚠️ Giao dịch đã tồn tại: ${trans.transactionID}`);
+                        continue; // Không cộng tiền/ gửi thông báo lại
+                    }
+
+                    // 3) Chỉ cộng tiền và tạo lịch sử khi vừa insert mới
                     if (user && trans.type === 'IN') {
+                        const tiencu = user.balance;
+                        user.balance += (totalAmount || amount);
+                        user.tongnap = (user.tongnap || 0) + (totalAmount || amount);
+                        user.tongnapthang = (user.tongnapthang || 0) + (totalAmount || amount);
+
+                        try {
+                            const cfg = await Configweb.findOne();
+                            const vipThreshold = Number(cfg?.daily) || 0;
+                            const distributorThreshold = Number(cfg?.distributor) || 0;
+                            if (user.tongnap >= distributorThreshold) {
+                                user.capbac = 'distributor';
+                            } else if (user.tongnap >= vipThreshold) {
+                                user.capbac = 'vip';
+                            }
+                        } catch (cfgErr) {
+                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
+                        }
+
+                        const historyData = new HistoryUser({
+                            username,
+                            madon: "null",
+                            hanhdong: "Cộng tiền",
+                            link: "",
+                            tienhientai: tiencu,
+                            tongtien: (totalAmount || amount),
+                            tienconlai: user.balance,
+                            createdAt: new Date(),
+                            mota: bonus > 0
+                                ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`,
+                        });
+                        await historyData.save();
+                        await user.save();  
+
+                        // Thông báo Telegram
+                        const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
+                        const teleConfig = await Telegram.findOne();
+                        if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
+                            const adminChatId = teleConfig.chatId;
+                            const adminbottoken = teleConfig.botToken;
+                            const userbotToken = teleConfig.bot_notify;
+                            const telegramMessage =
+                                `📌 *NẠP TIỀN THÀNH CÔNG!*\n` +
+                                `📌 *Trans_id:* ${trans.transactionID || "khong co"}\n` +
+                                `👤 *Khách hàng:* ${username}\n` +
+                                `💰 *Số tiền nạp:* ${Number(Math.floor(Number(amount))).toLocaleString("en-US")}\n` +
+                                `🎁 *Khuyến mãi:* ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")}\n` +
+                                `🔹 *Tổng cộng:* ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")}\n` +
+                                `🔹 *Số dư:* ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `⏰ *Thời gian:* ${taoluc.toLocaleString("vi-VN", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    second: "2-digit",
+                                })}\n`;
+                            try {
+                                if (adminChatId) {
+                                    await axios.post(`https://api.telegram.org/bot${adminbottoken}/sendMessage`, {
+                                        chat_id: adminChatId,
+                                        text: telegramMessage,
+                                        parse_mode: "Markdown",
+                                    });
+                                }
+                                if (user.telegramChatId) {
+                                    const userMessage =
+                                        `🎉 Bạn vừa nạp tiền thành công!\n` +
+                                        `💰 Số tiền: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ\n` +
+                                        (bonus > 0 ? `🎁 Khuyến mãi: +${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ\n` : '') +
+                                        `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ\n` +
+                                        `💼 Số dư mới: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                        `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
+                                            day: "2-digit", month: "2-digit", year: "numeric",
+                                            hour: "2-digit", minute: "2-digit", second: "2-digit",
+                                        })}`;
+                                    await axios.post(`https://api.telegram.org/bot${userbotToken}/sendMessage`, {
+                                        chat_id: user.telegramChatId,
+                                        text: userMessage,
+                                    });
+                                }
+                                console.log("Thông báo Telegram đã được gửi.");
+                            } catch (telegramError) {
+                                console.error("Lỗi gửi thông báo Telegram:", telegramError.message);
+                            }
+                        }
+
                         if (bonus > 0) {
                             console.log(`🎁 ${bank.bank_name.toUpperCase()}: +${amount} (+${bonus} KM) => ${username}`);
                         } else {
