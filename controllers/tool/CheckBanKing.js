@@ -88,8 +88,8 @@ async function calculateBonus(amount) {
     return { bonus, promo }; // Trả về tiền thưởng và tỷ lệ khuyến mãi
 }
 
-// Cron job mỗi phút
-cron.schedule('*/15 * * * * *', async () => {
+// Cron job mỗi 30 giây
+cron.schedule('*/30 * * * * *', async () => {
     console.log('⏳ Đang chạy cron job...');
 
     try {
