@@ -337,6 +337,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      category : category.name,
       notes: { note: category.notes || "", modal_show: category.modal_show || "" },
       data: formattedServices,
     });
