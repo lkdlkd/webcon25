@@ -27,7 +27,27 @@ exports.getConfigweb = async (req, res) => {
       await config.save();
     }
 
-    res.status(200).json({ success: true, data: config });
+    // Chuẩn bị dữ liệu trả về
+    const responseData = {
+      tieude: config.tieude,
+      title: config.title,
+      logo: config.logo,
+      favicon: config.favicon,
+      linktele: config.linktele,
+      cuphap: config.cuphap,
+      daily: config.daily,
+      distributor: config.distributor,
+      lienhe: config.lienhe,
+      domain: config.domain,
+    };
+
+    // Chỉ hiển thị viewluotban nếu user là admin
+    const user = req.user;
+    if (user && user.role === 'admin') {
+      responseData.viewluotban = config.viewluotban ;
+    }
+
+    res.status(200).json({ success: true, data: responseData });
   } catch (error) {
     console.error("Lỗi khi lấy cấu hình website:", error);
     res.status(500).json({ success: false, message: "Lỗi server", error: error.message });
@@ -41,7 +61,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor , viewluotban} = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -65,7 +85,7 @@ exports.updateConfigweb = async (req, res) => {
     config.lienhe = lienhe !== undefined ? lienhe : [];
     config.cuphap = cuphap !== undefined && cuphap.trim() !== "" ? cuphap : config.cuphap || "naptien"; // Kiểm tra giá trị trống cho cuphap
     config.linktele = linktele !== undefined ? linktele : ""; // Kiểm tra giá trị trống cho linktele
-
+    config.viewluotban = viewluotban !== undefined ? viewluotban : config.viewluotban || false; // Kiểm tra giá trị trống cho viewluotban
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });

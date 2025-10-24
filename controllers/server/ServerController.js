@@ -4,7 +4,7 @@ const User = require('../../models/User');
 
 // Thêm dịch vụ mới (chỉ admin)
 const Counter = require("../../models/Counter "); // Import model Counter
-
+const Configweb = require('../../models/Configweb');
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
   try {
@@ -287,6 +287,9 @@ exports.getServerByTypeAndPath = async (req, res) => {
       return res.status(200).json({ success: true, notes: { note: "", modal_show: "" }, data: [] });
     }
 
+    // Lấy cấu hình website để kiểm tra viewluotban
+    const config = await Configweb.findOne();
+
     // Lấy danh sách dịch vụ theo category._id và chỉ lấy dịch vụ đang hoạt động
     let services = await Service.find({ category: category._id })
       .populate("category", "name path thutu")
@@ -300,28 +303,37 @@ exports.getServerByTypeAndPath = async (req, res) => {
       return sa - sb;
     });
 
-    const formattedServices = services.map(service => ({
-      description: service.description,
-      Magoi: service.Magoi,
-      id: service.id,
-      maychu: service.maychu,
-      name: service.name,
-      rate: getEffectiveRate(service, user),
-      min: service.min,
-      max: service.max,
-      getid: service.getid,
-      comment: service.comment,
-      reaction: service.reaction,
-      matlive: service.matlive,
-      type: service.type ? service.type.name : "không xác định",
-      category: service.category?.name || "Không xác định",
-      path: service.category?.path || "",
-      isActive: service.isActive,
-      tocdodukien: service.tocdodukien || "Chưa cập nhật",
-      updatedAt: service.updatedAt,
-      refil: service.refil,
-      cancel: service.cancel,
-    }));
+    const formattedServices = services.map(service => {
+      const baseService = {
+        description: service.description,
+        Magoi: service.Magoi,
+        id: service.id,
+        maychu: service.maychu,
+        name: service.name,
+        rate: getEffectiveRate(service, user),
+        min: service.min,
+        max: service.max,
+        getid: service.getid,
+        comment: service.comment,
+        reaction: service.reaction,
+        matlive: service.matlive,
+        type: service.type ? service.type.name : "không xác định",
+        category: service.category?.name || "Không xác định",
+        path: service.category?.path || "",
+        isActive: service.isActive,
+        tocdodukien: service.tocdodukien || "Chưa cập nhật",
+        updatedAt: service.updatedAt,
+        refil: service.refil,
+        cancel: service.cancel,
+      };
+
+      // Chỉ hiển thị luotban nếu config.viewluotban là true
+      if (config && config.viewluotban) {
+        baseService.luotban = service.luotban || 0;
+      }
+
+      return baseService;
+    });
 
     return res.status(200).json({
       success: true,

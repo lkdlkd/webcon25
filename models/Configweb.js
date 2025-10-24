@@ -9,6 +9,7 @@ const configwebSchema = new mongoose.Schema({
   cuphap: { type: String, default: "naptien" },
   daily: {type : Number, default: 1000000}, // hoa hồng đại lý
   distributor: {type : Number, default: 10000000}, // hoa hồng nhà phân phối
+  viewluotban: { type: Boolean, default: false }, // hiển thị lượt bán trên dịch vụ
   lienhe: [
     {
       type: { type: String, default: "" },

@@ -304,6 +304,11 @@ async function addOrder(req, res) {
       createdAt,
       mota: `Tăng ${serviceFromDb.maychu} ${serviceFromDb.name} thành công cho uid ${link}`,
     });
+    await Service.findOneAndUpdate(
+      { Magoi: serviceFromDb.Magoi },
+      { $inc: { luotban: 1 } },
+      { new: true }
+    );
 
     await orderData.save();
     await HistoryData.save();

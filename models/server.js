@@ -21,6 +21,7 @@ const serviceSchema = new mongoose.Schema({
   max: { type: Number, required: true },//max lấy bên thứ 3
   Linkdv: { type: String, required: false },//facebook-like, tiktok-view...
   tocdodukien: { type: String, required: false },//tốc độ dự kiến
+  luotban: { type: Number, default: 0 },//lượt bán
   serviceId: { type: String, required: true },//sv ở bên thứ 3
   thutu: { type: String, required: false , default: 4 },// thứ tự
   //option
