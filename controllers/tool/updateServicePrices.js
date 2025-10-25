@@ -118,6 +118,7 @@ async function updateServicePrices() {
               const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
               if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
                 const telegramMessage = `📌 *Cập nhật giá ${direction}!*\n` +
+                  `🔹 *Mã gói:* ${serviceItem.Magoi}\n` +
                   `👤 *Dịch vụ:* ${serviceItem.name}\n` +
                   `🔹 *Giá cũ:* ${oldRate}\n` +
                   `🔹 *Giá Thành Viên:* ${newmember}\n` +
@@ -171,6 +172,7 @@ async function updateServicePrices() {
               const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
               if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
                 const telegramMessage = `📌 *Cập nhật giá ${direction}!*\n` +
+                  `🔹 *Mã gói:* ${serviceItem.Magoi}\n` +
                   `👤 *Dịch vụ:* ${serviceItem.name}\n` +
                   `🔹 *Giá cũ:* ${oldRate}\n` +
                   `🔹 *Giá Thành Viên:* ${newmember}\n` +
