@@ -15,6 +15,7 @@ exports.getConfigweb = async (req, res) => {
         title: "",
         daily: 1000000,
         distributor: 10000000,
+        viewluotban: false,
         lienhe: [
           {
             type: "",
