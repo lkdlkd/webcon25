@@ -88,7 +88,7 @@ exports.getServer = async (req, res) => {
       }
       // Admin: có thể xem tất cả dịch vụ với phân trang
       const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 10;
+      const limit = parseInt(req.query.limit) || 1000000;
       const skip = (page - 1) * limit;
 
       const totalServices = await Service.countDocuments(filter);

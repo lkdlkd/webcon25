@@ -63,6 +63,13 @@ app.use((req, res, next) => {
 });
 // Kết nối MongoDB
 connectDB();
+
+// Migration: Chạy 1 lần khi khởi động
+const { migrateServiceStatus } = require('@/controllers/tool/migrationStatus');
+connectDB().then(() => {
+  migrateServiceStatus();
+});
+
 app.get('/', (req, res) => {
     res.send('API is running...');
 });
