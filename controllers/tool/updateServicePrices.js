@@ -4,6 +4,11 @@ const Service = require('../../models/server');
 const SmmSv = require('../../models/SmmSv');
 const Telegram = require('../../models/Telegram');
 const Platform = require('../../models/platform');
+const configweb = require('../../models/Configweb');
+
+// Biến chống chồng lệnh
+let isUpdating = false;
+let updateStartTime = null;
 
 // Helper: Tính giá mới theo tỷ lệ riêng cho từng cấp bậc
 function calculateNewPrices(apiRate, priceUpdateMember, priceUpdateVip, priceUpdateDistributor) {
@@ -137,10 +142,22 @@ async function updateServicePrice(serviceItem, apiService, apiRate, smmSvConfig)
 
 // Hàm kiểm tra và cập nhật giá dịch vụ
 async function updateServicePrices() {
+  // Kiểm tra chống chồng lệnh
+  if (isUpdating) {
+    const elapsedTime = Date.now() - updateStartTime;
+    console.warn(`⚠️ Bỏ qua: Tiến trình cập nhật giá đang chạy (${Math.round(elapsedTime / 1000)}s)`);
+    return;
+  }
+
+  isUpdating = true;
+  updateStartTime = Date.now();
+
   try {
     const services = await Service.find({});
-    console.log(`Đang kiểm tra ${services.length} dịch vụ...`);
-
+    console.log(`🔄 Bắt đầu kiểm tra ${services.length} dịch vụ...`);
+    
+    const config = await configweb.findOne({});
+    
     // Gom nhóm các service theo DomainSmm
     const smmGroups = {};
     for (const service of services) {
@@ -181,6 +198,8 @@ async function updateServicePrices() {
               (s) => Number(s.service) === Number(serviceItem.serviceId)
             );
 
+            let needSave = false;
+
             if (!apiService) {
               console.warn(`Không tìm thấy dịch vụ ${serviceItem.serviceId} trong API cho ${serviceItem.name}`);
               serviceItem.isActive = false;
@@ -188,13 +207,25 @@ async function updateServicePrices() {
               return;
             }
 
+            // Tự động cập nhật trạng thái isActive nếu config.autoactive = true
+            if (config && config.autoactive === true && serviceItem.isActive !== true) {
+              serviceItem.isActive = true;
+              needSave = true;
+              console.log(`✅ Đã tự động kích hoạt dịch vụ: ${serviceItem.name}`);
+            }
+
             // Cập nhật min và max nếu có trong API
             if (apiService.min && apiService.max) {
               if (serviceItem.min !== apiService.min || serviceItem.max !== apiService.max) {
                 serviceItem.min = apiService.min;
                 serviceItem.max = apiService.max;
-                await serviceItem.save();
+                needSave = true;
               }
+            }
+
+            // Lưu các thay đổi trước khi gọi updateServicePrice
+            if (needSave) {
+              await serviceItem.save();
             }
 
             const apiRate = apiService.rate * smmSvConfig.tigia;
@@ -206,10 +237,17 @@ async function updateServicePrices() {
         })
       );
 
-      console.log(`Đã xử lý xong dịch vụ từ nguồn ${smmSvConfig.name} (${smmGroups[domainId].length} dịch vụ).`);
+      console.log(`✅ Đã xử lý xong dịch vụ từ nguồn ${smmSvConfig.name} (${smmGroups[domainId].length} dịch vụ).`);
     }
+
+    const totalTime = Date.now() - updateStartTime;
+    console.log(`✅ Hoàn thành cập nhật giá trong ${Math.round(totalTime / 1000)}s`);
   } catch (error) {
-    console.error('Lỗi khi lấy danh sách dịch vụ:', error.message);
+    console.error('❌ Lỗi khi lấy danh sách dịch vụ:', error.message);
+  } finally {
+    // Luôn luôn reset trạng thái để cho phép lần chạy tiếp theo
+    isUpdating = false;
+    updateStartTime = null;
   }
 }
 
@@ -233,6 +271,6 @@ async function updateTypeToPlatformId() {
 
 const cronExpression = '*/30 * * * * *'; // Chạy mỗi 30 giây
 cron.schedule(cronExpression, () => {
-  console.log('Bắt đầu công việc cập nhật giá dịch vụ theo lịch...');
+  console.log('⏰ Cron job: Bắt đầu kiểm tra giá dịch vụ...');
   updateServicePrices();
 });

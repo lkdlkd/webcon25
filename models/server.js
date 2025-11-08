@@ -33,6 +33,7 @@ const serviceSchema = new mongoose.Schema({
   matlive: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   ischeck: { type: Boolean, default: false }, // đã kiểm tra dịch vụ
   isActive: { type: Boolean, default: true }, // Hiển thị hoặc ẩn dịch vụ
+  status: { type: Boolean, default: true }, // Trạng thái dịch vụ
   domain: { type: String, default: null },
 }, { timestamps: true }); // Thêm createdAt và updatedAt tự động
 

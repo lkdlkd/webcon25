@@ -72,27 +72,20 @@ exports.getServer = async (req, res) => {
     if (!user) {
       return res.status(401).json({ success: false, message: "Không xác thực được người dùng" });
     }
-
-    const search = req.query.search ? req.query.search.trim() : "";
-    let filter = {};
-
-    // Tạo bộ lọc tìm kiếm
-    if (search) {
-      filter = {
-        $or: [
-          { Magoi: { $regex: search, $options: "i" } },
-          { serviceId: { $regex: search, $options: "i" } },
-          { name: { $regex: search, $options: "i" } },
-        ],
-      };
-    }
-
-    // Nếu không phải admin, chỉ hiển thị các dịch vụ đang hoạt động
-    if (user.role !== "admin") {
-      filter = { ...filter, isActive: true };
-    }
-
     if (user.role === "admin") {
+      const search = req.query.search ? req.query.search.trim() : "";
+      let filter = {};
+
+      // Tạo bộ lọc tìm kiếm
+      if (search) {
+        filter = {
+          $or: [
+            { Magoi: { $regex: search, $options: "i" } },
+            { serviceId: { $regex: search, $options: "i" } },
+            { name: { $regex: search, $options: "i" } },
+          ],
+        };
+      }
       // Admin: có thể xem tất cả dịch vụ với phân trang
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
@@ -146,6 +139,7 @@ exports.getServer = async (req, res) => {
         reaction: service.reaction,
         matlive: service.matlive,
         isActive: service.isActive,
+        status: service.status,
         createdAt: service.createdAt,
         updatedAt: service.updatedAt,
         tocdodukien: service.tocdodukien || "Chưa cập nhật",
@@ -166,8 +160,7 @@ exports.getServer = async (req, res) => {
         },
       });
     } else {
-      // User thường: chỉ lấy các trường cần thiết
-      let services = await Service.find(filter)
+      let services = await Service.find({ isActive: true, status: true })
         .populate("category", "name path thutu")
         .populate("type", "name logo thutu");
 
@@ -291,7 +284,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
     const config = await Configweb.findOne();
 
     // Lấy danh sách dịch vụ theo category._id và chỉ lấy dịch vụ đang hoạt động
-    let services = await Service.find({ category: category._id })
+    let services = await Service.find({ category: category._id, status: true })
       .populate("category", "name path thutu")
       .populate("type", "name logo thutu")
       .sort("thutu");
@@ -337,7 +330,7 @@ exports.getServerByTypeAndPath = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      category : category.name,
+      category: category.name,
       notes: { note: category.notes || "", modal_show: category.modal_show || "" },
       data: formattedServices,
     });
