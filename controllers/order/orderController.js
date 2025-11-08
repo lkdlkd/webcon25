@@ -345,7 +345,7 @@ async function addOrder(req, res) {
       });
     }
 
-    res.status(200).json({ message: 'Mua dịch vụ thành công' });
+    res.status(200).json({ success: true, message: 'Mua dịch vụ thành công' });
   } catch (error) {
     console.error(error);
     // Nếu có lỗi từ provider, ưu tiên trả message của provider, ẩn thông tin nhạy cảm
