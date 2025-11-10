@@ -9,6 +9,7 @@ require('@/controllers/tool/RestThang');
 require('@/controllers/tool/laytrangthaicard');
 require('@/controllers/tool/CheckBanKing');
 require('@/controllers/tool/Updatetocdo'); // Đảm bảo import Updatetocdo.js để chạy cronjob cập nhật tốc độ dịch vụ
+require('@/controllers/tool/autoDeleteOldData'); // Cronjob tự động xóa dữ liệu cũ (chạy 2h sáng mỗi ngày)
 const cors = require('cors');
 const api = require('@/routes/api'); // Đường dẫn đúng đến file api.js
 const app = express();

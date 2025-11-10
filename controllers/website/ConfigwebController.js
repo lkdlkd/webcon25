@@ -17,6 +17,11 @@ exports.getConfigweb = async (req, res) => {
         distributor: 10000000,
         viewluotban: false,
         autoactive: false,
+        autoremove: false,
+        deleteOrders: false,
+        deleteUsers: false,
+        deleteHistory: false,
+        autoDeleteMonths: 3,
         lienhe: [
           {
             type: "",
@@ -48,6 +53,11 @@ exports.getConfigweb = async (req, res) => {
     if (user && user.role === 'admin') {
       responseData.viewluotban = config.viewluotban ;
       responseData.autoactive = config.autoactive ;
+      responseData.autoremove = config.autoremove ;
+      responseData.autoDeleteMonths = config.autoDeleteMonths ;
+      responseData.deleteOrders = config.deleteOrders ;
+      responseData.deleteUsers = config.deleteUsers ;
+      responseData.deleteHistory = config.deleteHistory ;
     }
 
     res.status(200).json({ success: true, data: responseData });
@@ -64,7 +74,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor , viewluotban , autoactive} = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor , viewluotban , autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -90,11 +100,46 @@ exports.updateConfigweb = async (req, res) => {
     config.linktele = linktele !== undefined ? linktele : ""; // Kiểm tra giá trị trống cho linktele
     config.viewluotban = viewluotban !== undefined ? viewluotban : config.viewluotban || false; // Kiểm tra giá trị trống cho viewluotban
     config.autoactive = autoactive !== undefined ? autoactive : config.autoactive || false; // Kiểm tra giá trị trống cho autoactive
+    config.autoremove = autoremove !== undefined ? autoremove : config.autoremove || false; // Kiểm tra giá trị trống cho autoremove
+    config.autoDeleteMonths = autoDeleteMonths !== undefined ? autoDeleteMonths : config.autoDeleteMonths || 3; // Kiểm tra giá trị trống cho autoDeleteMonths
+    config.deleteOrders = deleteOrders !== undefined ? deleteOrders : config.deleteOrders || false; // Kiểm tra giá trị trống cho deleteOrders
+    config.deleteUsers = deleteUsers !== undefined ? deleteUsers : config.deleteUsers || false; // Kiểm tra giá trị trống cho deleteUsers
+    config.deleteHistory = deleteHistory !== undefined ? deleteHistory : config.deleteHistory || false; // Kiểm tra giá trị trống cho deleteHistory
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });
   } catch (error) {
     console.error("Lỗi khi cập nhật cấu hình website:", error);
+    res.status(500).json({ success: false, message: "Lỗi server", error: error.message });
+  }
+};
+
+// Xóa dữ liệu cũ thủ công (API cho admin)
+exports.manualDeleteOldData = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Chỉ admin mới có quyền thực hiện' });
+    }
+
+    // Import hàm xóa
+    const { autoDeleteOldData } = require('../tool/autoDeleteOldData');
+    
+    // Gọi hàm xóa (async nhưng không chờ để trả response ngay)
+    autoDeleteOldData()
+      .then(() => {
+        console.log('✅ Xóa thủ công hoàn tất');
+      })
+      .catch((error) => {
+        console.error('❌ Lỗi khi xóa thủ công:', error);
+      });
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Đã bắt đầu xóa dữ liệu cũ. Kiểm tra console để xem tiến trình.' 
+    });
+  } catch (error) {
+    console.error("Lỗi khi xóa dữ liệu:", error);
     res.status(500).json({ success: false, message: "Lỗi server", error: error.message });
   }
 };

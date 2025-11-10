@@ -7,10 +7,15 @@ const configwebSchema = new mongoose.Schema({
   favicon: { type: String, default: "" },
   linktele: { type: String, default: "" },
   cuphap: { type: String, default: "naptien" },
-  daily: {type : Number, default: 1000000}, // hoa hồng đại lý
-  distributor: {type : Number, default: 10000000}, // hoa hồng nhà phân phối
+  daily: { type: Number, default: 1000000 }, // hoa hồng đại lý
+  distributor: { type: Number, default: 10000000 }, // hoa hồng nhà phân phối
   viewluotban: { type: Boolean, default: false }, // hiển thị lượt bán trên dịch vụ
   autoactive: { type: Boolean, default: false }, // tự động cập nhật trạng thái server
+  autoremove: { type: Boolean, default: false }, // tự động xóa trên 3 tháng
+  autoDeleteMonths: { type: Number, default: 3 }, // số tháng để xóa
+  deleteOrders: { type: Boolean, default: false }, // xóa đơn hàng
+  deleteUsers: { type: Boolean, default: false }, // xóa user
+  deleteHistory: { type: Boolean, default: false }, // xóa lịch sử
   lienhe: [
     {
       type: { type: String, default: "" },
