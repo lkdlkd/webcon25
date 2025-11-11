@@ -1,5 +1,5 @@
 const Refund = require('../../models/Refund');
-
+const Order = require('../../models/Order');
 const User = require('../../models/User');
 const HistoryUser = require('../../models/History');
 const Telegram = require('../../models/Telegram');
@@ -14,7 +14,7 @@ exports.getRefunds = async (req, res) => {
         if (!user) {
             return res.status(401).json({ error: 'Không xác thực được người dùng' });
         }
-        filter.status = status ;
+        filter.status = status;
         const refunds = await Refund.find(filter).sort({ createdAt: -1 });
         return res.status(200).json({ success: true, data: refunds });
     } catch (error) {
@@ -74,6 +74,12 @@ exports.adminApproveRefund = async (req, res) => {
 
                 refund.status = true;
                 await refund.save();
+
+                // Cập nhật Order: iscancel = false (đánh dấu đã xử lý)
+                await Order.updateOne(
+                    { Madon: refund.madon },
+                    { $set: { iscancel: false } }
+                );
 
                 // Lưu lịch sử hoàn tiền
                 const historyData = new HistoryUser({
@@ -176,6 +182,12 @@ exports.adminDeleteRefunds = async (req, res) => {
                     continue;
                 }
                 await Refund.deleteOne({ _id: refund._id });
+                // Cập nhật Order: iscancel = false (đánh dấu đã xử lý)
+                await Order.updateOne(
+                    { Madon: refund.madon },
+                    { $set: { iscancel: false } }
+                );
+
                 successes.push({ madon: code });
             } catch (err) {
                 failures.push({ madon: code, reason: err.message || 'Lỗi không xác định' });
