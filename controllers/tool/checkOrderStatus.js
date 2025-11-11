@@ -212,6 +212,11 @@ async function checkOrderStatus() {
         if (soTienHoan > 50 && ['Partial', 'Canceled'].includes(mappedStatus)) {
           const isApproved = smmConfig.autohoan === 'on';
 
+          // Nếu Canceled, set dachay = 0 (chưa chạy gì)
+          if (mappedStatus === 'Canceled') {
+            updateData.dachay = 0;
+          }
+
           // Prepare refund
           refundsToInsert.push({
             updateOne: {

@@ -7,7 +7,7 @@ const User = require('../../models/User');
 const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // Giả sử bạn có một lớp để xử lý API SMM
 const Telegram = require('../../models/Telegram');
-
+const Counter = require('../../models/Counter ');
 // Helper: lấy đơn giá theo cấp bậc user
 function getEffectiveRate(service, user) {
     try {
@@ -201,9 +201,29 @@ exports.AddOrder = async (req, res) => {
         user.balance = newBalance;
         await user.save();
 
-        // --- Bước 6: Tạo mã đơn (Madon) ---
-        const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
-        const newMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) + 1 : 10000;
+        // Lấy mã đơn từ Counter (tự động tăng)
+        let counter = await Counter.findOne({ name: 'orderCounter' });
+
+        if (!counter) {
+            // Lần đầu tiên: lấy mã đơn lớn nhất từ Order
+            const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
+            const maxMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) : 9999;
+
+            // Khởi tạo counter với giá trị tiếp theo
+            counter = await Counter.create({
+                name: 'orderCounter',
+                value: maxMadon + 1
+            });
+        } else {
+            // Tăng counter và lấy giá trị mới
+            counter = await Counter.findOneAndUpdate(
+                { name: 'orderCounter' },
+                { $inc: { value: 1 } },
+                { new: true }
+            );
+        }
+
+        const newMadon = counter.value;
 
         // --- Bước 7: Tạo đối tượng đơn hàng và lưu vào CSDL ---
         const createdAt = new Date();

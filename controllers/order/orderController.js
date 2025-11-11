@@ -5,6 +5,7 @@ const HistoryUser = require('../../models/History');
 const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // hoặc đường dẫn tương ứng
 const Telegram = require('../../models/Telegram');
+const Counter = require('../../models/Counter ');
 
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
@@ -219,8 +220,29 @@ async function addOrder(req, res) {
     user.balance = newBalance;
     await user.save();
 
-    const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
-    const newMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) + 1 : 10000;
+    // Lấy mã đơn từ Counter (tự động tăng)
+    let counter = await Counter.findOne({ name: 'orderCounter' });
+    
+    if (!counter) {
+      // Lần đầu tiên: lấy mã đơn lớn nhất từ Order
+      const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
+      const maxMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) : 9999;
+      
+      // Khởi tạo counter với giá trị tiếp theo
+      counter = await Counter.create({
+        name: 'orderCounter',
+        value: maxMadon + 1
+      });
+    } else {
+      // Tăng counter và lấy giá trị mới
+      counter = await Counter.findOneAndUpdate(
+        { name: 'orderCounter' },
+        { $inc: { value: 1 } },
+        { new: true }
+      );
+    }
+    
+    const newMadon = counter.value;
 
     const createdAt = new Date();
     // Xây dựng ObjectLink cho các nền tảng facebook / tiktok / instagram
