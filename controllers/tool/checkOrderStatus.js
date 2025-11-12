@@ -213,45 +213,53 @@ async function checkOrderStatus() {
             REQUEST_TIMEOUT_MS,
             `multiStatus ${groupKey} size=${ids.length}`
           );
-          resData = Object.assign({}, res);
-          const rawErr = res && (res.error || res.err || res.Error);
+          // Kiểm tra response hợp lệ
+          if (!res || typeof res !== 'object') {
+            console.error(`❌ [${groupKey}] Response không hợp lệ (null/undefined/not object)`);
+            console.error(res);
+            state.chunks.push({ ids, tries: tries + 1 });
+            state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
+            continue;
+          }
+
+          const rawErr = res.error || res.err || res.Error;
+
+          // Nếu có error field hoặc response không chứa data hợp lệ
           if (rawErr) {
-            // Chuẩn hóa lỗi khi API trả về object lỗi thay vì throw
             const code = rawErr?.response?.status;
             const errCode = typeof rawErr === 'string' ? rawErr : (rawErr?.code || rawErr?.error || rawErr?.name);
             const msg = typeof rawErr === 'string' ? rawErr : (rawErr?.message || '');
+
             if ((rawErr?.code === 'ETIMEDOUT') || /timeout/i.test(msg)) {
               console.warn(`⏰ [${groupKey}] TIMEOUT chunk (size=${ids.length}) sau ${REQUEST_TIMEOUT_MS}ms`);
-              // timeout: đẩy chunk về cuối để thử lại sau, giữ pacing
               state.chunks.push({ ids, tries: tries + 1 });
               state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
               continue;
             }
-            // Network transient errors (e.g., ECONNRESET / socket hang up)
+
             if (errCode === 'read ECONNRESET' || errCode === 'ECONNRESET' || errCode === 'ECONNABORTED' || /ECONNRESET|socket hang up|network error/i.test(msg)) {
               console.warn(`🌐 [${groupKey}] NETWORK ERROR (${errCode || 'unknown'}) chunk (size=${ids.length}): ${msg}`);
-
               if (tries >= 2) {
                 console.error(`🚫 [${groupKey}] Bỏ chunk sau ${tries} lần ECONNRESET`);
-                continue; // bỏ qua chunk này
+                continue;
               }
               state.chunks.push({ ids, tries: tries + 1 });
               state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
               continue;
             }
+
             console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
-            // Nếu rate limit -> đặt cooldown và đẩy chunk lại đầu hàng đợi
             if (code === 429 || /rate|limit|too many/i.test(msg)) {
               state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;
               state.chunks.unshift({ ids, tries });
             } else {
-              // lỗi khác: đẩy chunk về cuối để thử lại sau
               state.chunks.push({ ids, tries: tries + 1 });
             }
-            // đặt giãn cách tối thiểu trước khi gọi lại nguồn này
             state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
             continue;
           }
+          // Response hợp lệ: assign data
+          resData = Object.assign({}, res);
         } catch (err) {
           const code = err?.response?.status;
           const errCode = (typeof err === 'string') ? err : (err?.code || err?.error);
