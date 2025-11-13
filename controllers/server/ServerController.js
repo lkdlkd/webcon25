@@ -142,7 +142,7 @@ exports.getServer = async (req, res) => {
       const formattedServices = services.map(service => ({
         _id: service._id,
         // Sử dụng optional chaining để tránh lỗi khi không có DomainSmm được populate
-        DomainSmm: service.DomainSmm?.name || "Đơn tay",
+        DomainSmm: service.DomainSmm?.name || "Không xác định",
         serviceName: service.serviceName,
         originalRate: service.originalRate,
         category: service.category ? service.category.name : "Không xác định",
