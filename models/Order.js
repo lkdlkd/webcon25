@@ -24,6 +24,7 @@ const orderSchema = new mongoose.Schema({
   refil: { type: String, enum: ["on", "off"], default: "off" }, // chức năng refil
   cancel: { type: String, enum: ["on", "off"], default: "off" }, // chức năng hủy đơn
   iscancel: { type: Boolean, default: false }, // trạng thái hủy đơn
+  ordertay: { type: Boolean, default: false }, // đơn hàng tay
   domain: { type: String, default: null },
 }, { timestamps: true }); // Tự động tạo createdAt và updatedAt
 

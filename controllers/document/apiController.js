@@ -125,29 +125,24 @@ exports.AddOrder = async (req, res) => {
     try {
         // --- Bước 1: Lấy thông tin dịch vụ từ CSDL ---
         const serviceFromDb = await fetchServiceData(magoi);
-        const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
-
-        const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
-        // const allServices = await smm.services();
-
-        // const serviceFromApi = allServices.find(
-        //     s => s.service === Number(serviceFromDb.serviceId) || s.service === serviceFromDb.serviceId
-        // );
-        // if (!serviceFromApi) throw new Error('lỗi khi mua dịch vụ, vui lòng ib admin11');
-
 
         // Tính tổng chi phí và làm tròn 2 số thập phân
         const rateForUser = getEffectiveRate(serviceFromDb, user);
         const totalCost = rateForUser * qty; // Kết quả: 123.4
         const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
-        // Chỉ kiểm tra giá nếu ischeck = true
-        if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
-            throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+
+        // Kiểm tra nếu là đơn tay (ordertay = true)
+        const isManualOrder = serviceFromDb.ordertay === true ? true : false;
+
+        if (!isManualOrder) {
+            // Chỉ kiểm tra giá nếu ischeck = true
+            if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
+                throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+            }
         }
 
         if (!serviceFromDb.isActive) {
             throw new Error("Dịch vụ bảo trì, vui lòng mua sv khác");
-            // return res.status(400).json({ error: "Dịch vụ bảo trì, vui lòng mua sv khác" });
         }
         if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
             throw new Error('Số lượng không hợp lệ');
@@ -161,41 +156,49 @@ exports.AddOrder = async (req, res) => {
         const lai = totalCost - (apiRate * qty);
         const tientieu = apiRate * qty;
 
-        // --- Bước 4: Gửi yêu cầu mua dịch vụ qua API bên thứ 3 ---
-        const purchasePayload = {
-            link,
-            quantity: qty,
-            service: serviceFromDb.serviceId,
-            comments: formattedComments,
-        };
+        let purchaseOrderId;
 
-        const purchaseResponse = await smm.order(purchasePayload);
-        if (!purchaseResponse || !purchaseResponse.order) {
-            // Một số nguồn trả về lỗi theo nhiều dạng khác nhau
-            // const status = purchaseResponse?.status;
-            const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+        if (isManualOrder) {
+            // Đơn tay: tạo orderId ngẫu nhiên
+            purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
+        } else {
+            // Đơn API: gửi yêu cầu mua dịch vụ qua API bên thứ 3
+            const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
+            const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
 
-            // if (status === 500) {
-            //     throw new Error("Lỗi khi mua dịch vụ, vui lòng thử lại");
-            // }
-            if (nestedError) {
-                console.error('Đối tác trả về lỗi', nestedError);
-                const errRaw = String(nestedError);
-                const errStr = errRaw.toLowerCase();
-                // Nhạy cảm: số dư, đường link, số điện thoại VN
-                const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
-                const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-                const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
-                    || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
-                if (isSensitive) {
-                    throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+            const purchasePayload = {
+                link,
+                quantity: qty,
+                service: serviceFromDb.serviceId,
+                comments: formattedComments,
+            };
+
+            const purchaseResponse = await smm.order(purchasePayload);
+            if (!purchaseResponse || !purchaseResponse.order) {
+                const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+
+                if (nestedError) {
+                    console.error('Đối tác trả về lỗi', nestedError);
+                    const errRaw = String(nestedError);
+                    const errStr = errRaw.toLowerCase();
+                    // Nhạy cảm: số dư, đường link, số điện thoại VN
+                    const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
+                    const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
+                    const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
+                        || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
+                    if (isSensitive) {
+                        throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+                    } else {
+                        throw new Error(String(nestedError));
+                    }
                 } else {
-                    throw new Error(String(nestedError));
+                    throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
                 }
-            } else {
-                throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
             }
+
+            purchaseOrderId = purchaseResponse.order;
         }
+
         // --- Bước 5: Trừ số tiền vào tài khoản người dùng ---
         const newBalance = user.balance - totalCost;
         user.balance = newBalance;
@@ -279,7 +282,7 @@ exports.AddOrder = async (req, res) => {
             Magoi: serviceFromDb.Magoi,
             username,
             SvID: serviceFromDb.serviceId,
-            orderId: purchaseResponse.order,
+            orderId: purchaseOrderId,
             namesv: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
             category: serviceFromDb.category.name || "Không xác định",
             link,
@@ -297,6 +300,7 @@ exports.AddOrder = async (req, res) => {
             tientieu: tientieu,
             refil: serviceFromDb.refil,
             cancel: serviceFromDb.cancel,
+            ordertay: isManualOrder,
         });
 
         const HistoryData = new HistoryUser({
@@ -531,8 +535,46 @@ exports.cancelOrder = async (req, res) => {
                     results.push(result);
                     continue;
                 }
+                // Kiểm tra nếu là đơn tay (ordertay = true)
+                const isManualOrder = ordersDoc.ordertay === true;
+
+                if (isManualOrder) {
+                    const createdAt = new Date();
+                    // Đơn tay: hủy trực tiếp không cần gọi API
+                    const historyData = new HistoryUser({
+                        username: ordersDoc.username,
+                        madon: ordersDoc.Madon,
+                        hanhdong: "Hủy đơn",
+                        link: ordersDoc.link,
+                        tienhientai: user.balance,
+                        tongtien: 0,
+                        tienconlai: user.balance,
+                        createdAt: new Date(),
+                        mota: `Hủy đơn dịch vụ ${ordersDoc.namesv} uid => ${ordersDoc.link}`,
+                    });
+                    await historyData.save();
+                    ordersDoc.iscancel = true;
+                    await ordersDoc.save();
+                    const teleConfig = await Telegram.findOne();
+                    if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                        // Giờ Việt Nam (UTC+7)
+                        const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                        const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n\n🆔 
+                                Mã đơn: ${order.Madon}\n👤 
+                                Khách hàng: ${ordersDoc.username}\n📱 
+                                Dịch vụ: ${ordersDoc.namesv}\n🔗 
+                                Link/UID: ${ordersDoc.link}\n⏰ 
+                                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                        await sendTelegramNotification({
+                            telegramBotToken: teleConfig.botToken,
+                            telegramChatId: teleConfig.chatId,
+                            message: telegramMessage,
+                        });
+                    }
+                    return res.json({ success: true, message: 'Đơn hàng đã được hủy thành công' });
+                }
                 // Lấy config SmmSv theo domain
-                const smmConfig = await SmmSv.findById(order.DomainSmm);
+                const smmConfig = await SmmSv.findById(ordersDoc.DomainSmm);
                 if (!smmConfig) {
                     result.cancel = { error: 'Đơn hàng không thể hủy' };
                     results.push(result);

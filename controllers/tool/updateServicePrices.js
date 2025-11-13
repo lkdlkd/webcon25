@@ -153,7 +153,8 @@ async function updateServicePrices() {
   updateStartTime = Date.now();
 
   try {
-    const services = await Service.find({});
+    // Không lấy các dịch vụ có ordertay = true
+    const services = await Service.find({ ordertay: { $ne: true } });
     console.log(`🔄 Bắt đầu kiểm tra ${services.length} dịch vụ...`);
     
     const config = await configweb.findOne({});
@@ -169,8 +170,9 @@ async function updateServicePrices() {
     // Duyệt qua từng nhóm DomainSmm
     for (const domainId in smmGroups) {
       const smmSvConfig = await SmmSv.findById(domainId);
-      if (!smmSvConfig?.url_api || !smmSvConfig?.api_token) {
-        console.warn(`Cấu hình API chưa được thiết lập cho domainId ${domainId}`);
+      // Bỏ qua nếu không có config hoặc status = 'off'
+      if (!smmSvConfig?.url_api || !smmSvConfig?.api_token || smmSvConfig.ordertay === true ) {
+        console.warn(`Bỏ qua domainId ${domainId}: Cấu hình không đầy đủ hoặc đã tắt`);
         continue;
       }
 

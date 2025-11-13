@@ -19,7 +19,7 @@ const serviceSchema = new mongoose.Schema({
   maychu: { type: String, required: false },//sv1
   min: { type: Number, required: true },//min lấy bên thứ 3
   max: { type: Number, required: true },//max lấy bên thứ 3
-  Linkdv: { type: String, required: false },//facebook-like, tiktok-view...
+  Linkdv: { type: String, required: false },//facebook-like, tiktok-view... // ko tác dụng
   tocdodukien: { type: String, required: false },//tốc độ dự kiến
   luotban: { type: Number, default: 0 },//lượt bán
   serviceId: { type: String, required: true },//sv ở bên thứ 3
@@ -34,6 +34,7 @@ const serviceSchema = new mongoose.Schema({
   ischeck: { type: Boolean, default: false }, // đã kiểm tra dịch vụ
   isActive: { type: Boolean, default: true }, // Hiển thị hoặc ẩn dịch vụ
   status: { type: Boolean, default: true }, // Trạng thái dịch vụ
+  ordertay: { type: Boolean, default: false }, // Đơn hàng tay
   domain: { type: String, default: null },
 }, { timestamps: true }); // Thêm createdAt và updatedAt tự động
 

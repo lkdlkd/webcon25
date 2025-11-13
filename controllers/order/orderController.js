@@ -24,7 +24,7 @@ function getEffectiveRate(service, user) {
 // Lấy đơn hàng theo category, user, và từ khóa tìm kiếm (phân trang)
 async function getOrders(req, res) {
   const user = req.user;
-  const { category, search, status } = req.query;
+  const { category, search, status ,ordertay} = req.query;
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   const skip = (page - 1) * limit;
@@ -46,9 +46,12 @@ async function getOrders(req, res) {
       { link: { $regex: search, $options: 'i' } }
     ];
   }
+  if (ordertay) {
+    filter.ordertay = ordertay === 'true';
+  }
 
   try {
-    let selectFields = '-SvID -orderId -DomainSmm -lai -tientieu'; // Các trường không cần thiết cho người dùng thường
+    let selectFields = '-SvID -orderId -DomainSmm -lai -tientieu -ordertay'; // Các trường không cần thiết cho người dùng thường
     if (user.role === 'admin') {
       selectFields = ''; // admin xem tất cả các trường
     }
@@ -153,23 +156,22 @@ async function addOrder(req, res) {
 
     // Lấy thông tin dịch vụ
     const serviceFromDb = await fetchServiceData(magoi);
-    const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
-
-    const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
-
-    // const allServices = await smm.services();
-    // const serviceFromApi = allServices.find(
-    //   s => s.service === Number(serviceFromDb.serviceId) || s.service === serviceFromDb.serviceId
-    // );
 
     // Kiểm tra số dư và số lượng
     const rateForUser = getEffectiveRate(serviceFromDb, user);
     const totalCost = rateForUser * qty;
     const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
-    // Chỉ kiểm tra giá nếu ischeck = true
-    if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
-      throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+
+    // Kiểm tra nếu là đơn tay (ordertay = true)
+    const isManualOrder = serviceFromDb.ordertay === true ? true : false;
+
+    if (!isManualOrder) {
+      // Chỉ kiểm tra giá nếu ischeck = true
+      if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
+        throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+      }
     }
+
     if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
       throw new Error('Số lượng không hợp lệ');
     }
@@ -179,42 +181,54 @@ async function addOrder(req, res) {
     if (serviceFromDb.isActive === false) {
       throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
     }
+
     const lai = totalCost - (apiRate * qty);
     const tientieu = apiRate * qty;
-    // Gửi yêu cầu mua dịch vụ
-    const purchasePayload = {
-      link,
-      quantity: qty,
-      service: serviceFromDb.serviceId,
-      comments: formattedComments,
-    };
-    const purchaseResponse = await smm.order(purchasePayload);
-    if (!purchaseResponse || !purchaseResponse.order) {
-      // Một số nguồn trả về lỗi theo nhiều dạng khác nhau
-      // const status = purchaseResponse?.status;
-      const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
 
-      // if (status === 500) {
-      //   throw new Error("Lỗi khi mua dịch vụ, vui lòng thử lại");
-      // }
-      if (nestedError) {
-        console.error('Đối tác trả về lỗi', nestedError);
-        const errRaw = String(nestedError);
-        const errStr = errRaw.toLowerCase();
-        // Nhạy cảm: số dư, đường link, số điện thoại VN
-        const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
-        const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-        const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
-          || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
-        if (isSensitive) {
-          throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+    let purchaseOrderId;
+
+    if (isManualOrder) {
+      // Đơn tay: tạo orderId ngẫu nhiên
+      purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
+    } else {
+      // Đơn API: gửi yêu cầu mua dịch vụ
+      const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
+      const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
+
+      const purchasePayload = {
+        link,
+        quantity: qty,
+        service: serviceFromDb.serviceId,
+        comments: formattedComments,
+      };
+      const purchaseResponse = await smm.order(purchasePayload);
+
+      if (!purchaseResponse || !purchaseResponse.order) {
+        // Một số nguồn trả về lỗi theo nhiều dạng khác nhau
+        const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+
+        if (nestedError) {
+          console.error('Đối tác trả về lỗi', nestedError);
+          const errRaw = String(nestedError);
+          const errStr = errRaw.toLowerCase();
+          // Nhạy cảm: số dư, đường link, số điện thoại VN
+          const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
+          const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
+          const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
+            || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
+          if (isSensitive) {
+            throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+          } else {
+            throw new Error(String(nestedError));
+          }
         } else {
-          throw new Error(String(nestedError));
+          throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
         }
-      } else {
-        throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
       }
+
+      purchaseOrderId = purchaseResponse.order;
     }
+
     // Cập nhật số dư và lưu đơn hàng
     const newBalance = user.balance - totalCost;
     user.balance = newBalance;
@@ -222,12 +236,12 @@ async function addOrder(req, res) {
 
     // Lấy mã đơn từ Counter (tự động tăng)
     let counter = await Counter.findOne({ name: 'orderCounter' });
-    
+
     if (!counter) {
       // Lần đầu tiên: lấy mã đơn lớn nhất từ Order
       const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
       const maxMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) : 9999;
-      
+
       // Khởi tạo counter với giá trị tiếp theo
       counter = await Counter.create({
         name: 'orderCounter',
@@ -241,7 +255,7 @@ async function addOrder(req, res) {
         { new: true }
       );
     }
-    
+
     const newMadon = counter.value;
 
     const createdAt = new Date();
@@ -296,7 +310,7 @@ async function addOrder(req, res) {
       Magoi: serviceFromDb.Magoi,
       username,
       SvID: serviceFromDb.serviceId,
-      orderId: purchaseResponse.order,
+      orderId: purchaseOrderId,
       namesv: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
       category,
       link,
@@ -313,6 +327,7 @@ async function addOrder(req, res) {
       lai: lai,
       refil: serviceFromDb.refil,
       cancel: serviceFromDb.cancel,
+      ordertay: isManualOrder,
     });
 
     const HistoryData = new HistoryUser({

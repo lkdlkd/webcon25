@@ -2,6 +2,9 @@ const Order = require('../../models/Order');
 const SmmSv = require('../../models/SmmSv');
 const SmmApiService = require('../Smm/smmServices');
 const HistoryUser = require('../../models/History');
+const Telegram = require('../../models/Telegram');
+const axios = require('axios');
+
 // const Refill = require('../../models/Refill');
 exports.refillOrder = async (req, res) => {
     try {
@@ -18,6 +21,45 @@ exports.refillOrder = async (req, res) => {
             return res.status(403).json({ success: false, error: 'Bạn không có quyền thực hiện!' });
         }
 
+        // Kiểm tra nếu là đơn tay (ordertay = true)
+        const isManualOrder = order.ordertay === true;
+
+        if (isManualOrder) {
+            const createdAt = new Date();
+            // Đơn tay: hủy trực tiếp không cần gọi API
+            const historyData = new HistoryUser({
+                username: order.username,
+                madon: order.Madon,
+                hanhdong: "Bảo hành",
+                link: order.link,
+                tienhientai: user.balance,
+                tongtien: 0,
+                tienconlai: user.balance,
+                createdAt: new Date(),
+                mota: `Bảo hành dịch vụ ${order.namesv} thành công cho uid ${order.link}`,
+            });
+            await historyData.save();
+
+            const teleConfig = await Telegram.findOne();
+            if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                // Giờ Việt Nam (UTC+7)
+                const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n\n🆔 
+                Mã đơn: ${order.Madon}\n👤 
+                Khách hàng: ${order.username}\n📱 
+                Dịch vụ: ${order.namesv}\n🔗 
+                Link/UID: ${order.link}\n⏰ 
+                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                await sendTelegramNotification({
+                    telegramBotToken: teleConfig.botToken,
+                    telegramChatId: teleConfig.chatId,
+                    message: telegramMessage,
+                });
+            }
+            return res.json({ success: true, error: 'Đơn hàng đã được bảo hành thành công' });
+        }
+
+        // Đơn API: gọi API để refill
         // Lấy config SmmSv theo ObjectId DomainSmm
         const smmConfig = await SmmSv.findById(order.DomainSmm);
         if (!smmConfig) return res.status(400).json({ error: 'Lỗi liên hệ admin!1' });
@@ -60,6 +102,22 @@ exports.refillOrder = async (req, res) => {
     }
 };
 
+async function sendTelegramNotification(data) {
+    const { telegramBotToken, telegramChatId, message } = data;
+    if (telegramBotToken && telegramChatId) {
+        try {
+            await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+                chat_id: telegramChatId,
+                text: message,
+            });
+            console.log('Thông báo Telegram đã được gửi.');
+        } catch (error) {
+            console.error('Lỗi gửi thông báo Telegram:', error.message);
+        }
+    } else {
+        console.log('Thiếu thông tin cấu hình Telegram.');
+    }
+}
 // Hàm hủy đơn
 exports.cancelOrder = async (req, res) => {
     try {
@@ -81,6 +139,47 @@ exports.cancelOrder = async (req, res) => {
         if (order.status === "Completed") return res.status(400).json({ success: false, error: 'Đơn hàng đã hoàn thành không thể hủy' });
         if (order.status === "Partial" || order.status === "Canceled") return res.status(400).json({ success: false, error: 'Đơn hàng đã được hủy' });
         if (order.cancel !== "on") return res.status(400).json({ success: false, error: 'Đơn hàng không hỗ trợ hủy' });
+
+        // Kiểm tra nếu là đơn tay (ordertay = true)
+        const isManualOrder = order.ordertay === true;
+
+        if (isManualOrder) {
+            const createdAt = new Date();
+            // Đơn tay: hủy trực tiếp không cần gọi API
+            const historyData = new HistoryUser({
+                username: order.username,
+                madon: order.Madon,
+                hanhdong: "Hủy đơn",
+                link: order.link,
+                tienhientai: user.balance,
+                tongtien: 0,
+                tienconlai: user.balance,
+                createdAt: new Date(),
+                mota: `Hủy đơn dịch vụ ${order.namesv} uid => ${order.link}`,
+            });
+            await historyData.save();
+            order.iscancel = true;
+            await order.save();
+            const teleConfig = await Telegram.findOne();
+            if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                // Giờ Việt Nam (UTC+7)
+                const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n\n🆔 
+                Mã đơn: ${order.Madon}\n👤 
+                Khách hàng: ${order.username}\n📱 
+                Dịch vụ: ${order.namesv}\n🔗 
+                Link/UID: ${order.link}\n⏰ 
+                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                await sendTelegramNotification({
+                    telegramBotToken: teleConfig.botToken,
+                    telegramChatId: teleConfig.chatId,
+                    message: telegramMessage,
+                });
+            }
+            return res.json({ success: true, message: 'Đơn hàng đã được hủy thành công' });
+        }
+
+        // Đơn API: gọi API để hủy
         // Lấy config SmmSv theo ObjectId DomainSmm
         const smmConfig = await SmmSv.findById(order.DomainSmm);
         if (!smmConfig) return res.status(400).json({ error: 'Lỗi liên hệ admin!1' });
@@ -147,6 +246,7 @@ exports.cancelOrder = async (req, res) => {
             return res.json({ success: true, message: 'Đơn hàng đã được hủy thành công' });
         }
     } catch (err) {
+        console.log(err);
         res.status(500).json({ error: 'Lỗi liên hệ admin!' });
     }
 };

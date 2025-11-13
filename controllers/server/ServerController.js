@@ -5,6 +5,7 @@ const User = require('../../models/User');
 // Thêm dịch vụ mới (chỉ admin)
 const Counter = require("../../models/Counter "); // Import model Counter
 const Configweb = require('../../models/Configweb');
+const SmmSv = require('../../models/SmmSv');
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
   try {
@@ -51,13 +52,39 @@ exports.addServer = async (req, res) => {
     } else {
       rateDistributor = rate;
     }
-    const newService = new Service({
+
+    // Nếu ordertay = true, tự động sinh các trường bắt buộc
+    let serviceData = {
       ...req.body,
       rate,
       ratevip,
       rateDistributor,
-      Magoi: counter.value, // Gán giá trị Magoi từ bộ đếm
-    });
+      Magoi: counter.value,
+    };  
+
+    if (req.body.ordertay === true) {
+      // Tìm hoặc tạo SmmSv "Đơn tay"
+      let smmDonTay = await SmmSv.findOne({ ordertay: true });
+      if (!smmDonTay) {
+        smmDonTay = await SmmSv.create({
+          name: "Đơn tay",
+          url_api: "https://manual-order.local",
+          api_token: "manual_token_placeholder",
+          status: "on",
+          update_price: "off",
+          autohoan: "off",
+          ordertay: true,
+        });
+      }
+      
+      // Tự động gán các trường với thông tin giả
+      serviceData.DomainSmm = smmDonTay._id;
+      serviceData.serviceName = serviceData.name || `Dịch vụ ${counter.value}`;
+      serviceData.originalRate = rateDistributor;
+      serviceData.serviceId = `manual_${counter.value}`;
+    }
+
+    const newService = new Service(serviceData);
 
     await newService.save();
     res.status(201).json({ success: true, message: "Dịch vụ được thêm thành công", data: newService });
@@ -115,7 +142,7 @@ exports.getServer = async (req, res) => {
       const formattedServices = services.map(service => ({
         _id: service._id,
         // Sử dụng optional chaining để tránh lỗi khi không có DomainSmm được populate
-        DomainSmm: service.DomainSmm?.name || "Không xác định",
+        DomainSmm: service.DomainSmm?.name || "Đơn tay",
         serviceName: service.serviceName,
         originalRate: service.originalRate,
         category: service.category ? service.category.name : "Không xác định",
@@ -147,6 +174,7 @@ exports.getServer = async (req, res) => {
         refil: service.refil,
         cancel: service.cancel,
         ischeck: service.ischeck,
+        ordertay: service.ordertay
       }));
 
       return res.status(200).json({

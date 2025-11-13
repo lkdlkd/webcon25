@@ -128,9 +128,11 @@ async function checkOrderStatus() {
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
     // BATCH 1: Lấy orders (giới hạn 500 đơn/lần để tránh quá tải)
+    // Không lấy đơn tay (ordertay = true)
     const runningOrders = await Order.find({
       status: { $in: ["Pending", "In progress", "Processing"] },
-      createdAt: { $gte: threeMonthsAgo }
+      createdAt: { $gte: threeMonthsAgo },
+      ordertay: { $ne: true } // Loại bỏ đơn tay
     }).limit(1000).lean();
 
     tongdon = runningOrders.length;
