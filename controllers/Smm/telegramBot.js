@@ -115,6 +115,10 @@ async function checkSmmBalancesAndNotify() {
     if (!panels.length) return;
     const lowPanels = [];
     for (const p of panels) {
+      if (p.ordertay === true) {
+        continue;
+      }
+
       try {
         const data = await fetchPanelBalance(p);
         let rawBalance = parseFloat((data.balance ?? '').toString().trim());

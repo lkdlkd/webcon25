@@ -73,6 +73,11 @@ exports.getAllPartners = async (req, res) => {
             let balance = null;
             let balanceError = null;
             let balanceStatus = 'idle';
+            // 👉 Bỏ qua nếu là đơn tay
+            if (partner.ordertay === true) {
+                balanceStatus = 'manual';
+                return { ...partner.toObject(), balance, balanceError, balanceStatus };
+            }
             if (partner.url_api && partner.api_token) {
                 const smmService = new SmmApiService(partner.url_api, partner.api_token);
                 try {
