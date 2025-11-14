@@ -24,7 +24,7 @@ function getEffectiveRate(service, user) {
 // Lấy đơn hàng theo category, user, và từ khóa tìm kiếm (phân trang)
 async function getOrders(req, res) {
   const user = req.user;
-  const { category, search, status ,ordertay} = req.query;
+  const { category, search, status, ordertay } = req.query;
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
   const skip = (page - 1) * limit;
@@ -391,7 +391,7 @@ async function addOrder(req, res) {
     const errStr = providerMsg.toLowerCase();
     const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
     const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-    const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
+    const isSensitive = errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
       || urlRegex.test(providerMsg) || phoneRegexVN.test(providerMsg);
     const safeMessage = isSensitive || !providerMsg ? 'Lỗi khi mua dịch vụ, vui lòng thử lại' : providerMsg;
     res.status(500).json({ error: safeMessage });

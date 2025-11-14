@@ -211,7 +211,8 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
             min: serviceData.min,
             max: serviceData.max,
             cancel: serviceData.cancel ? "on" : "off",
-            refil: serviceData.refill ? "on" : "off"
+            refil: serviceData.refill ? "on" : "off",
+            isActive: serviceData.isActive === true || serviceData.isActive === "on" ? true : false
         };
 
         // So sánh và cập nhật nếu có thay đổi

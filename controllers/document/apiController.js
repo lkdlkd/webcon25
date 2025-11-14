@@ -52,7 +52,7 @@ exports.getServiceswebcon = async (req, res) => {
             return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
         }
         // Lấy danh sách dịch vụ từ CSDL
-        const services = await Service.find({ isActive: true })
+        const services = await Service.find()
             .populate("category", "name path thutu")
             .populate("type", "name thutu"); // Lấy thông tin của Platform
         // Định dạng các trường cần hiển thị với giá theo cấp bậc
@@ -76,9 +76,10 @@ exports.getServiceswebcon = async (req, res) => {
                 thutu: service.thutu || "",
                 getid: service.getid === "on",
                 comment: service.comment === "on",
-                path: service.category?.path  || "",
+                path: service.category?.path || "",
                 thutucategory: service.category?.thutu || 0,
                 thututype: service.type?.thutu || 0,
+                isActive: service.isActive || false,
             };
         });
 
@@ -431,7 +432,7 @@ exports.AddOrder = async (req, res) => {
         const msgLower = providerMsg.toLowerCase();
         const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
         const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-        const sensitive = msgLower.includes('số dư') || msgLower.includes('balance') || msgLower.includes('xu') || msgLower.includes('tiền')
+        const sensitive =  msgLower.includes('balance') || msgLower.includes('xu') || msgLower.includes('tiền')
             || urlRegex.test(providerMsg) || phoneRegexVN.test(providerMsg);
         const safeMessage = sensitive || !providerMsg ? 'Lỗi khi mua dịch vụ, vui lòng thử lại' : providerMsg;
         res.status(500).json({ error: safeMessage });

@@ -109,7 +109,6 @@ exports.getServer = async (req, res) => {
           $or: [
             { Magoi: { $regex: search, $options: "i" } },
             { serviceId: { $regex: search, $options: "i" } },
-            { name: { $regex: search, $options: "i" } },
           ],
         };
       }
