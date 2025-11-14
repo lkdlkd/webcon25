@@ -5,7 +5,7 @@ const HistoryUser = require('../../models/History');
 const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // hoặc đường dẫn tương ứng
 const Telegram = require('../../models/Telegram');
-const Counter = require('../../models/Counter ');
+const Counter = require('../../models/Counter');
 
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {

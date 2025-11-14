@@ -101,6 +101,10 @@ class SmmApiService {
   async services(opts) {
     return this.connect({ action: 'services' }, opts);
   }
+  
+  async webcon(opts) {
+    return this.connect({ action: 'webcon' }, opts);
+  }
 
   async refill(orderId, opts) {
     return this.connect({ action: 'refill', order: orderId }, opts);

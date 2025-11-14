@@ -92,8 +92,13 @@ async function updateServicePrice(serviceItem, apiService, apiRate, smmSvConfig)
   const shouldUpdatePrice =
     typeof serviceItem.originalRate === 'number' &&
     smmSvConfig.update_price === "on" &&
-    (apiRate !== previousOriginal) &&
-    (dbRate < apiRate || dbRateVip < apiRate || dbRateDistributor < apiRate || apiRate < previousOriginal);
+    (
+      apiRate !== previousOriginal ||
+      dbRate < apiRate ||
+      dbRateVip < apiRate ||
+      dbRateDistributor < apiRate ||
+      apiRate < previousOriginal
+    );
 
   if (shouldUpdatePrice) {
     const oldRate = serviceItem.rate;
@@ -156,9 +161,9 @@ async function updateServicePrices() {
     // Không lấy các dịch vụ có ordertay = true
     const services = await Service.find({ ordertay: { $ne: true } });
     console.log(`🔄 Bắt đầu kiểm tra ${services.length} dịch vụ...`);
-    
+
     const config = await configweb.findOne({});
-    
+
     // Gom nhóm các service theo DomainSmm
     const smmGroups = {};
     for (const service of services) {
@@ -171,7 +176,7 @@ async function updateServicePrices() {
     for (const domainId in smmGroups) {
       const smmSvConfig = await SmmSv.findById(domainId);
       // Bỏ qua nếu không có config hoặc status = 'off'
-      if (!smmSvConfig?.url_api || !smmSvConfig?.api_token || smmSvConfig.ordertay === true ) {
+      if (!smmSvConfig?.url_api || !smmSvConfig?.api_token || smmSvConfig.ordertay === true) {
         console.warn(`Bỏ qua domainId ${domainId}: Cấu hình không đầy đủ hoặc đã tắt`);
         continue;
       }
@@ -272,7 +277,10 @@ async function updateTypeToPlatformId() {
 }
 
 const cronExpression = '*/30 * * * * *'; // Chạy mỗi 30 giây
-cron.schedule(cronExpression, () => {
-  console.log('⏰ Cron job: Bắt đầu kiểm tra giá dịch vụ...');
-  updateServicePrices();
-});
+const webcon = process.env.webcon;
+if (!webcon) {
+  cron.schedule(cronExpression, () => {
+    console.log('⏰ Cron job: Bắt đầu kiểm tra giá dịch vụ...');
+    updateServicePrices();
+  });
+}

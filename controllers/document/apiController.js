@@ -7,7 +7,7 @@ const User = require('../../models/User');
 const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // Giả sử bạn có một lớp để xử lý API SMM
 const Telegram = require('../../models/Telegram');
-const Counter = require('../../models/Counter ');
+const Counter = require('../../models/Counter');
 // Helper: lấy đơn giá theo cấp bậc user
 function getEffectiveRate(service, user) {
     try {
@@ -24,6 +24,74 @@ function getEffectiveRate(service, user) {
 }
 
 /* Hàm lấy danh sách dịch vụ */
+exports.getServiceswebcon = async (req, res) => {
+    try {
+        const { key } = req.body;
+        // Kiểm tra xem token có được gửi không
+        // Kiểm tra xem token có được gửi không
+        if (!key) {
+            return res.status(400).json({ success: false, error: "Token không được bỏ trống" });
+        }
+        // Lấy user từ DB dựa trên userId từ decoded token
+        const user = await User.findOne({ apiKey: key });
+        if (!user) {
+            res.status(404).json({ error: 'Người dùng không tồn tại' });
+            return null;
+        }
+
+        // So sánh token trong header với token đã lưu của user
+        if (user.apiKey !== key) {
+            res.status(401).json({ error: 'api Key không hợp lệ1' });
+            return null;
+        }
+        // Kiểm tra trạng thái người dùng trong CSDL (ví dụ: 'active')
+        if (!user) {
+            return res.status(404).json({ success: false, error: "Không tìm thấy người dùng" });
+        }
+        if (user.status && user.status !== 'active') {
+            return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
+        }
+        // Lấy danh sách dịch vụ từ CSDL
+        const services = await Service.find({ isActive: true })
+            .populate("category", "name path thutu")
+            .populate("type", "name thutu"); // Lấy thông tin của Platform
+        // Định dạng các trường cần hiển thị với giá theo cấp bậc
+        const formattedServices = services.map(service => {
+            const rateForUser = getEffectiveRate(service, user);
+            return {
+                service: Number(service.Magoi),
+                name: `${service.maychu} ${service.name}`,
+                type: service.comment === "on" ? "Custom Comments" : "Default",
+                platform: service.type?.name || "không xác định",
+                category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
+                rate: rateForUser,
+                description: service.description || "",
+                min: service.min,
+                max: service.max,
+                cancel: service.cancel === "on",
+                refill: service.refil === "on",
+                tocdodukien: service.tocdodukien || "",
+                maychu: service.maychu || "",
+                luotban: service.luotban || 0,
+                thutu: service.thutu || "",
+                getid: service.getid === "on",
+                comment: service.comment === "on",
+                path: service.category?.path  || "",
+                thutucategory: service.category?.thutu || 0,
+                thututype: service.type?.thutu || 0,
+            };
+        });
+
+        return res.status(200).json(formattedServices);
+    } catch (error) {
+        console.error("Lỗi khi lấy danh sách dịch vụ:", error);
+        return res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách dịch vụ',
+            error: error.message
+        });
+    }
+};
 exports.getServices = async (req, res) => {
     try {
         const { key } = req.body;
@@ -688,6 +756,9 @@ exports.routeRequest = async (req, res) => {
     } else if (action === 'add') {
         // Gọi hàm tạo đơn hàng
         return exports.AddOrder(req, res);
+    } else if (action === 'webcon') {
+        // Gọi hàm lấy danh sách dịch vụ
+        return exports.getServiceswebcon(req, res);
     } else if (action === 'status') {
         // Gọi hàm tạo get trạng thái
         return exports.getOrderStatus(req, res);

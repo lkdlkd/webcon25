@@ -232,12 +232,28 @@ exports.deletePartner = async (req, res) => {
         if (!user || user.role !== "admin") {
             return res.status(403).json({ error: "Chỉ admin mới có quyền sử dụng chức năng này" });
         }
-        const deletedPartner = await SmmSv.findByIdAndDelete(req.params.id);
-        if (!deletedPartner) {
+
+        // Lấy thông tin partner trước khi xóa
+        const partner = await SmmSv.findById(req.params.id);
+
+        if (!partner) {
             return res.status(404).json({ message: "Không tìm thấy đối tác SMM!" });
         }
+
+        // Nếu đối tác có bật đơn tay -> không cho xóa
+        if (partner.ordertay === true) {
+            return res.status(400).json({
+                message: "Không thể xóa đối tác vì đang bật chế độ đơn tay (ordertay = true)!"
+            });
+        }
+
+        // Nếu không có đơn tay -> cho phép xóa
+        await SmmSv.findByIdAndDelete(req.params.id);
+
         res.status(200).json({ message: "Xóa thành công!" });
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
+

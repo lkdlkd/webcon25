@@ -111,6 +111,18 @@ router.get('/transactions', authenticate.authenticateUser, banking.getTransactio
 // Telegram linking
 // router.post('/user/telegram/link/start', authenticate.authenticateUser, user.startTelegramLink);
 
+// Sync services from SMM API
+const { syncAllServices } = require('@/controllers/tool/syncServicesFromSmm');
+router.post('/admin/sync-services', authenticate.authenticateAdmin, async (req, res) => {
+  try {
+    await syncAllServices();
+    res.json({ success: true, message: 'Đồng bộ services thành công' });
+  } catch (error) {
+    console.error('Lỗi đồng bộ services:', error);
+    res.status(500).json({ success: false, message: 'Lỗi khi đồng bộ services', error: error.message });
+  }
+});
+
 router.get('/promotions', authenticate.authenticateUser, getPromotions);
 router.post('/promotions', authenticate.authenticateAdmin, createPromotion);
 // Route để sửa chương trình khuyến mãi
