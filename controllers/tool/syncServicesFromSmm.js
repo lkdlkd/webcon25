@@ -51,6 +51,10 @@ async function sendPriceUpdateNotification(service, oldRate, newPrices, previous
  * Chạy mỗi 6 giờ một lần
  */
 
+// Biến chống chồng lệnh
+let isRunning = false;
+let syncStartTime = null;
+
 // Cache để tránh query database nhiều lần
 const platformCache = new Map();
 const categoryCache = new Map();
@@ -175,10 +179,12 @@ async function generateMagoi() {
 
 /**
  * Tìm hoặc tạo Service (với cache)
+ * @returns {Object} { service, isNew } - service object và flag đánh dấu tạo mới
  */
 async function findOrCreateService(serviceData, smmSvId, platformId, categoryId) {
     // Tạo cache key
     const cacheKey = `${smmSvId._id}_${serviceData.service}`;
+    let isNew = false;
 
     // Tìm service theo serviceId từ API (kiểm tra cache trước)
     let service = serviceCache.get(cacheKey);
@@ -238,7 +244,12 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
         // Xác định hướng thay đổi
 
 
-        // Điều kiện cập nhật giá
+        // Tính giá mới trước
+        const rateMember = Math.round(apirate * (1 + Number(smmSvId.price_update) / 100) * 10000) / 10000;
+        const rateVip = Math.round(apirate * (1 + Number(smmSvId.price_updateVip) / 100) * 10000) / 10000;
+        const rateDistributor = Math.round(apirate * (1 + Number(smmSvId.price_updateDistributor) / 100) * 10000) / 10000;
+
+        // Điều kiện cập nhật giá: giá API thay đổi HOẶC bất kỳ giá DB nào khác giá mới cần thiết
         const shouldUpdate =
             (
                 apirate !== previousOriginal ||
@@ -248,11 +259,6 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
                 apirate < previousOriginal // hoặc giá API giảm
             );
         if (shouldUpdate) {
-
-            const rateMember = Math.round(apirate * (1 + Number(smmSvId.price_update) / 100) * 10000) / 10000;
-            const rateVip = Math.round(apirate * (1 + Number(smmSvId.price_updateVip) / 100) * 10000) / 10000;
-            const rateDistributor = Math.round(apirate * (1 + Number(smmSvId.price_updateDistributor) / 100) * 10000) / 10000;
-
             const newPrices = {
                 member: rateMember,
                 vip: rateVip,
@@ -290,18 +296,8 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
 
         }
     } else {
-        // Kiểm tra xem serviceId đã tồn tại trong database chưa (double check)
-        const existingServiceInDb = await Service.findOne({
-            serviceId: Number(serviceData.service),
-            DomainSmm: smmSvId._id
-        });
-
-        if (existingServiceInDb) {
-            console.log(`⚠️ Service với serviceId ${serviceData.service} đã tồn tại, bỏ qua tạo mới`);
-            return existingServiceInDb;
-        }
-
-        // Tạo mới service nếu chưa tồn tại
+        // Tạo mới service
+        isNew = true;
         const magoi = await generateMagoi();
         const apirate = serviceData.rate;
         const ratemenber = Math.round(apirate * (1 + Number(smmSvId.price_update) / 100) * 10000) / 10000;
@@ -339,7 +335,7 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
         console.log(`✅ Tạo mới Service: ${service.name} (${service.Magoi})`);
     }
 
-    return service;
+    return { service, isNew };
 }
 
 /**
@@ -423,18 +419,13 @@ async function syncServicesFromSmmSource(smmSv) {
                 );
 
                 // 3. Tìm hoặc tạo Service
-                const existingService = await Service.findOne({
-                    serviceId: Number(serviceData.service),
-                    DomainSmm: smmSv._id
-                });
+                const result = await findOrCreateService(serviceData, smmSv, platform._id, category._id);
 
-                // Chỉ xử lý nếu service chưa tồn tại hoặc đã tồn tại (để cập nhật)
-                await findOrCreateService(serviceData, smmSv, platform._id, category._id);
-
-                if (existingService) {
-                    updated++;
-                } else {
+                // Đếm dựa trên flag isNew từ kết quả
+                if (result.isNew) {
                     created++;
+                } else {
+                    updated++;
                 }
 
             } catch (error) {
@@ -457,6 +448,16 @@ async function syncServicesFromSmmSource(smmSv) {
  * Main function - Đồng bộ tất cả SMM sources
  */
 async function syncAllServices() {
+    // Kiểm tra chống chồng lệnh
+    if (isRunning) {
+        const elapsedTime = Date.now() - syncStartTime;
+        console.warn(`⚠️ Bỏ qua: Tiến trình đồng bộ đang chạy (${Math.round(elapsedTime / 1000)}s)`);
+        return;
+    }
+
+    isRunning = true;
+    syncStartTime = Date.now();
+
     try {
         console.log("\n" + "=".repeat(60));
         console.log("🚀 BẮT ĐẦU ĐỒNG BỘ SERVICES TỪ SMM API");
@@ -489,8 +490,15 @@ async function syncAllServices() {
         console.log("✅ HOÀN THÀNH ĐỒNG BỘ SERVICES");
         console.log("=".repeat(60) + "\n");
 
+        const totalTime = Date.now() - syncStartTime;
+        console.log(`⏱️ Tổng thời gian đồng bộ: ${Math.round(totalTime / 1000)}s`);
+
     } catch (error) {
         console.error("❌ Lỗi tổng quát khi đồng bộ services:", error);
+    } finally {
+        // Luôn luôn reset trạng thái để cho phép lần chạy tiếp theo
+        isRunning = false;
+        syncStartTime = null;
     }
 }
 
