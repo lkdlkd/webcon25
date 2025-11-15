@@ -127,13 +127,36 @@ async function checkOrderStatus() {
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-    // BATCH 1: Lấy orders (giới hạn 500 đơn/lần để tránh quá tải)
-    // Không lấy đơn tay (ordertay = true)
-    const runningOrders = await Order.find({
+    // Lấy tối đa 1000 đơn theo điều kiện cơ bản
+    const orders = await Order.find({
       status: { $in: ["Pending", "In progress", "Processing"] },
       createdAt: { $gte: threeMonthsAgo },
-      ordertay: { $ne: true } // Loại bỏ đơn tay
+      ordertay: { $ne: true },
+      DomainSmm: { $exists: true }
     }).limit(1000).lean();
+
+    // Filter cực kỳ an toàn: loại bỏ null, undefined, false, true, 0, '', {}, []
+    const runningOrders = orders.filter(o => {
+      const d = o.DomainSmm;
+
+      // Loại bỏ các giá trị falsy hoặc boolean/number không hợp lệ
+      if (!d || typeof d === 'boolean' || typeof d === 'number' && d === 0) return false;
+
+      // Nếu là string, phải không rỗng
+      if (typeof d === 'string') return d.trim().length > 0;
+
+      // Nếu là array, phải có phần tử
+      if (Array.isArray(d)) return d.length > 0;
+
+      // Nếu là object, phải có key
+      if (typeof d === 'object') return Object.keys(d).length > 0;
+
+      // Giá trị hợp lệ khác
+      return true;
+    });
+
+    console.log(`⏳ Có ${runningOrders.length} đơn hợp lệ với DomainSmm.`);
+
 
     tongdon = runningOrders.length;
 
@@ -159,7 +182,14 @@ async function checkOrderStatus() {
     // Group orders
     const groups = {};
     for (const order of runningOrders) {
-      if (refundedMadons.has(order.Madon) || !order.DomainSmm) continue;
+      // Đã hoàn → bỏ qua
+      if (refundedMadons.has(order.Madon)) continue;
+
+      // KHÔNG CÓ DOMAIN SMM → BỎ QUA
+      if (!order.DomainSmm || !String(order.DomainSmm).trim()) {
+        console.warn(`⚠️ Bỏ qua đơn ${order.Madon} vì không có DomainSmm`);
+        continue;
+      }
 
       const domainSmmId = order.DomainSmm.toString();
       const smmConfig = smmConfigCache[domainSmmId];
