@@ -17,7 +17,7 @@ let tongdon = 0;
 
 // ===== PER-SOURCE PAGINATION (mỗi nguồn chỉ gọi 1 chunk tối đa 100 đơn/lần) =====
 const domainChunkState = {}; // { [domainId]: { nextIndex: number } }
-const CHUNK_SIZE = 100; // tối đa 100 đơn/1 lần gọi API theo yêu cầu
+const CHUNK_SIZE = 50; // tối đa 100 đơn/1 lần gọi API theo yêu cầu
 const MAX_CHUNK_PER_RUN = 1; // mỗi nguồn chỉ xử lý 1 chunk mỗi lần cron
 const PER_DOMAIN_INTERVAL_MS = 15_000; // thời gian giãn cách tối thiểu giữa 2 lần gọi 1 nguồn
 const RATE_LIMIT_COOLDOWN_MS = 60_000; // cooldown khi bị rate limit
@@ -185,7 +185,21 @@ async function checkOrderStatus() {
     const domainStates = {};
     for (const groupKey in groups) {
       const { smmService, smmConfig, orders } = groups[groupKey];
-      const orderIds = orders.map(o => o.orderId);
+      // Filter và validate order IDs: phải là số hoặc string không rỗng
+      const orderIds = orders
+        .map(o => o.orderId)
+        .filter(id => {
+          if (!id) return false;
+          if (typeof id === 'number') return true;
+          if (typeof id === 'string') return id.trim().length > 0;
+          return false;
+        });
+
+      if (orderIds.length === 0) {
+        console.warn(`⚠️ [${groupKey}] Không có order ID hợp lệ, bỏ qua nguồn này`);
+        continue;
+      }
+
       const chunks = chunkArray(orderIds, CHUNK_SIZE).map(ids => ({ ids, tries: 0 }));
       domainStates[groupKey] = {
         smmService,
@@ -251,6 +265,11 @@ async function checkOrderStatus() {
             }
 
             console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
+            if (/incorrect.*order.*id/i.test(msg) || /incorrect.*order.*id/i.test(errCode)) {
+              console.warn(`🚫 [${groupKey}] Bỏ chunk do order IDs không hợp lệ (${ids.length} IDs)`);
+              continue;
+            }
+
             if (code === 429 || /rate|limit|too many/i.test(msg)) {
               state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;
               state.chunks.unshift({ ids, tries });
@@ -286,6 +305,13 @@ async function checkOrderStatus() {
             continue;
           }
           console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
+
+          // Nếu là lỗi "Incorrect order IDs" -> bỏ qua chunk này (không retry)
+          if (/incorrect.*order.*id/i.test(msg) || /incorrect.*order.*id/i.test(errCode)) {
+            console.warn(`🚫 [${groupKey}] Bỏ chunk do order IDs không hợp lệ (${ids.length} IDs)`);
+            continue;
+          }
+
           // Nếu rate limit -> đặt cooldown và đẩy chunk lại đầu hàng đợi
           if (code === 429 || /rate|limit|too many/i.test(msg)) {
             state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;

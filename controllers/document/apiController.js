@@ -432,7 +432,7 @@ exports.AddOrder = async (req, res) => {
         const msgLower = providerMsg.toLowerCase();
         const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
         const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-        const sensitive =  msgLower.includes('balance') || msgLower.includes('xu') || msgLower.includes('tiền')
+        const sensitive = msgLower.includes('balance') || msgLower.includes('xu') || msgLower.includes('tiền')
             || urlRegex.test(providerMsg) || phoneRegexVN.test(providerMsg);
         const safeMessage = sensitive || !providerMsg ? 'Lỗi khi mua dịch vụ, vui lòng thử lại' : providerMsg;
         res.status(500).json({ error: safeMessage });
@@ -481,10 +481,15 @@ exports.getOrderStatus = async (req, res) => {
         let orderNumbers = [];
 
         if (orders) {
-            // `orders` là danh sách đơn hàng, cần format thành object
+            // `orders` là danh sách đơn hàng, giới hạn tối đa 100 đơn
             orderNumbers = Array.isArray(orders)
                 ? orders.map(num => Number(num))
                 : orders.split(',').map(num => Number(num.trim()));
+
+            // Giới hạn tối đa 100 đơn
+            if (orderNumbers.length > 100) {
+                return res.status(400).json({ error: "Chỉ được kiểm tra tối đa 100 đơn hàng mỗi lần" });
+            }
         } else if (order) {
             // `order` là danh sách hoặc một đơn duy nhất
             orderNumbers = [Number(order)];
@@ -562,6 +567,10 @@ exports.cancelOrder = async (req, res) => {
         let orderList = [];
         if (orders) {
             orderList = Array.isArray(orders) ? orders : orders.split(',').map(o => o.trim());
+            // Giới hạn tối đa 100 đơn
+            if (orderList.length > 100) {
+                return res.status(400).json({ error: "Chỉ được hủy tối đa 100 đơn hàng mỗi lần" });
+            }
         } else if (order) {
             orderList = [order];
         } else {
@@ -706,6 +715,197 @@ exports.cancelOrder = async (req, res) => {
     }
 };
 
+exports.refillOrder = async (req, res) => {
+    try {
+        const { key, order, orders } = req.body;
+        if (!key) return res.status(400).json({ error: 'Thiếu api key' });
+        const user = await User.findOne({ apiKey: key });
+        if (!user) return res.status(401).json({ error: 'Không tìm thấy người dùng' });
+
+        // Xác định danh sách đơn cần bảo hành
+        let orderList = [];
+        if (orders) {
+            orderList = Array.isArray(orders) ? orders : orders.split(',').map(o => o.trim());
+            // Giới hạn tối đa 100 đơn
+            if (orderList.length > 100) {
+                return res.status(400).json({ error: "Chỉ được bảo hành tối đa 100 đơn hàng mỗi lần" });
+            }
+        } else if (order) {
+            orderList = [order];
+        } else {
+            return res.status(400).json({ error: 'Thiếu mã đơn' });
+        }
+
+        // Lấy tất cả đơn hàng từ DB
+        const orderDocs = await Order.find({ Madon: { $in: orderList } });
+
+        // Nhóm đơn theo nguồn (DomainSmm) và loại (manual/API)
+        const manualOrders = [];
+        const apiOrdersBySource = new Map();
+        const results = [];
+
+        // Phân loại đơn hàng
+        for (const madon of orderList) {
+            const ordersDoc = orderDocs.find(doc => doc.Madon === Number(madon));
+            let result = { order: Number(madon) };
+
+            if (!ordersDoc) {
+                result.refill = { error: 'Incorrect order ID' };
+                results.push(result);
+                continue;
+            }
+
+            if (ordersDoc.refil !== "on") {
+                result.refill = { error: 'Đơn hàng không hỗ trợ bảo hành' };
+                results.push(result);
+                continue;
+            }
+
+            // Kiểm tra quyền bảo hành
+            if (user.role !== 'admin' && ordersDoc.username !== user.username) {
+                result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                results.push(result);
+                continue;
+            }
+
+            // Phân loại đơn tay và đơn API
+            const isManualOrder = ordersDoc.ordertay === true;
+            if (isManualOrder) {
+                manualOrders.push({ doc: ordersDoc, result });
+            } else {
+                const sourceId = ordersDoc.DomainSmm.toString();
+                if (!apiOrdersBySource.has(sourceId)) {
+                    apiOrdersBySource.set(sourceId, []);
+                }
+                apiOrdersBySource.get(sourceId).push({ doc: ordersDoc, result });
+            }
+        }
+
+        // Xử lý đơn tay
+        for (const { doc: ordersDoc, result } of manualOrders) {
+            try {
+                const createdAt = new Date();
+                const historyData = new HistoryUser({
+                    username: ordersDoc.username,
+                    madon: ordersDoc.Madon,
+                    hanhdong: "Bảo hành",
+                    link: ordersDoc.link,
+                    tienhientai: user.balance,
+                    tongtien: 0,
+                    tienconlai: user.balance,
+                    createdAt: new Date(),
+                    mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                });
+                await historyData.save();
+
+                const teleConfig = await Telegram.findOne();
+                if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                    const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                    const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n\n🆔 
+                    Mã đơn: ${ordersDoc.Madon}\n👤 
+                    Khách hàng: ${ordersDoc.username}\n📱 
+                    Dịch vụ: ${ordersDoc.namesv}\n🔗 
+                    Link/UID: ${ordersDoc.link}\n⏰ 
+                    Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                    await sendTelegramNotification({
+                        telegramBotToken: teleConfig.botToken,
+                        telegramChatId: teleConfig.chatId,
+                        message: telegramMessage,
+                    });
+                }
+                result.refill = 1;
+                results.push(result);
+            } catch (err) {
+                result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                results.push(result);
+            }
+        }
+
+        // Xử lý đơn API - nhóm theo nguồn
+        for (const [sourceId, orderGroup] of apiOrdersBySource) {
+            try {
+                const smmConfig = await SmmSv.findById(sourceId);
+                if (!smmConfig) {
+                    for (const { result } of orderGroup) {
+                        result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                        results.push(result);
+                    }
+                    continue;
+                }
+
+                const smmApi = new SmmApiService(smmConfig.url_api, smmConfig.api_token);
+                const orderIds = orderGroup.map(({ doc }) => doc.orderId);
+
+                // Gọi multiRefill nếu có nhiều đơn
+                let apiResult;
+                if (orderIds.length > 1) {
+                    apiResult = await smmApi.multiRefill(orderIds);
+                } else {
+                    apiResult = await smmApi.refill(orderIds[0]);
+                }
+
+                // Xử lý kết quả
+                if (Array.isArray(apiResult)) {
+                    // Kết quả từ multiRefill
+                    for (let i = 0; i < orderGroup.length; i++) {
+                        const { doc: ordersDoc, result } = orderGroup[i];
+                        const refillResult = apiResult[i];
+
+                        if (refillResult && !refillResult.error) {
+                            const historyData = new HistoryUser({
+                                username: ordersDoc.username,
+                                madon: ordersDoc.Madon,
+                                hanhdong: "Bảo hành",
+                                link: ordersDoc.link,
+                                tienhientai: user.balance,
+                                tongtien: 0,
+                                tienconlai: user.balance,
+                                createdAt: new Date(),
+                                mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                            });
+                            await historyData.save();
+                            result.refill = 1;
+                        } else {
+                            result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                        }
+                        results.push(result);
+                    }
+                } else {
+                    // Kết quả từ refill đơn lẻ
+                    const { doc: ordersDoc, result } = orderGroup[0];
+                    if (apiResult && !apiResult.error) {
+                        const historyData = new HistoryUser({
+                            username: ordersDoc.username,
+                            madon: ordersDoc.Madon,
+                            hanhdong: "Bảo hành",
+                            link: ordersDoc.link,
+                            tienhientai: user.balance,
+                            tongtien: 0,
+                            tienconlai: user.balance,
+                            createdAt: new Date(),
+                            mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                        });
+                        await historyData.save();
+                        result.refill = 1;
+                    } else {
+                        result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                    }
+                    results.push(result);
+                }
+            } catch (err) {
+                for (const { result } of orderGroup) {
+                    result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                    results.push(result);
+                }
+            }
+        }
+
+        return res.json(results);
+    } catch (err) {
+        res.status(500).json({ error: 'đơn hàng không thể bảo hành' });
+    }
+};
+
 exports.getme = async (req, res) => {
     try {
         const { key } = req.body;
@@ -769,6 +969,9 @@ exports.routeRequest = async (req, res) => {
     } else if (action === 'cancel') {
         // Gọi hàm hủy đơn hàng
         return exports.cancelOrder(req, res);
+    } else if (action === 'refill') {
+        // Gọi hàm bảo hành đơn hàng
+        return exports.refillOrder(req, res);
     } else {
         return res.status(400).json({ error: "Action không hợp lệ" });
     }
