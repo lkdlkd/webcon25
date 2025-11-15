@@ -518,9 +518,7 @@ async function checkOrderStatus() {
             queueTelegramNotification(teleConfig, order, soTienHoan, chuachay, isApproved, phihoan);
           }
 
-          const existingOrder = order;
-          const isDifferent = Object.keys(updateData).some(key => updateData[key] !== existingOrder[key]);
-          if (isDifferent) {
+          if (hasOrderChanged(updateData, order)) {
             chunkOrdersToUpdate.push({ filter: { _id: order._id }, update: updateData });
           }
 
@@ -597,6 +595,27 @@ async function checkOrderStatus() {
     totalProcessedOrders = 0;
     tongdon = 0;
   }
+}
+function hasOrderChanged(updateData, existingOrder) {
+  return Object.entries(updateData).some(([key, value]) => {
+    const oldValue = existingOrder[key];
+
+    // Bỏ qua undefined/null
+    if (value === undefined) return false;
+
+    // So sánh number với number
+    if (typeof value === 'number' && typeof oldValue === 'number') {
+      return value !== oldValue;
+    }
+
+    // So sánh string với string
+    if (typeof value === 'string' && typeof oldValue === 'string') {
+      return value.trim() !== oldValue.trim();
+    }
+
+    // So sánh các kiểu khác
+    return value != oldValue; // loose comparison cho an toàn
+  });
 }
 
 // Cron: Chạy mỗi phút
