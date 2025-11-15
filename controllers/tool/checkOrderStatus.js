@@ -22,6 +22,8 @@ const MAX_CHUNK_PER_RUN = 1; // mỗi nguồn chỉ xử lý 1 chunk mỗi lần
 const PER_DOMAIN_INTERVAL_MS = 15_000; // thời gian giãn cách tối thiểu giữa 2 lần gọi 1 nguồn
 const RATE_LIMIT_COOLDOWN_MS = 60_000; // cooldown khi bị rate limit
 const REQUEST_TIMEOUT_MS = 15_000; // timeout cho mỗi lần gọi trạng thái chunk
+const BATCH_SIZE = 500; // số đơn tối đa mỗi batch query
+const MAX_TOTAL_ORDERS = 5000; // số đơn tối đa xử lý mỗi lần chạy cron
 
 // ===== TELEGRAM QUEUE (tránh spam API) =====
 const telegramQueue = [];
@@ -127,36 +129,62 @@ async function checkOrderStatus() {
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-    // Lấy tối đa 1000 đơn theo điều kiện cơ bản
-    const orders = await Order.find({
+    // Đếm tổng số đơn cần xử lý
+    const totalCount = await Order.countDocuments({
       status: { $in: ["Pending", "In progress", "Processing"] },
       createdAt: { $gte: threeMonthsAgo },
       ordertay: { $ne: true },
       DomainSmm: { $exists: true }
-    }).limit(1000).lean();
-
-    // Filter cực kỳ an toàn: loại bỏ null, undefined, false, true, 0, '', {}, []
-    const runningOrders = orders.filter(o => {
-      const d = o.DomainSmm;
-
-      // Loại bỏ các giá trị falsy hoặc boolean/number không hợp lệ
-      if (!d || typeof d === 'boolean' || typeof d === 'number' && d === 0) return false;
-
-      // Nếu là string, phải không rỗng
-      if (typeof d === 'string') return d.trim().length > 0;
-
-      // Nếu là array, phải có phần tử
-      if (Array.isArray(d)) return d.length > 0;
-
-      // Nếu là object, phải có key
-      if (typeof d === 'object') return Object.keys(d).length > 0;
-
-      // Giá trị hợp lệ khác
-      return true;
     });
 
-    console.log(`⏳ Có ${runningOrders.length} đơn hợp lệ với DomainSmm.`);
+    console.log(`📊 Tổng ${totalCount} đơn cần kiểm tra`);
 
+    if (totalCount === 0) {
+      console.log("⏳ Không có đơn đang chạy.");
+      return;
+    }
+
+    // Xác định số batch cần lấy
+    const maxOrdersToProcess = Math.min(totalCount, MAX_TOTAL_ORDERS);
+    const numBatches = Math.ceil(maxOrdersToProcess / BATCH_SIZE);
+
+    console.log(`🔄 Sẽ xử lý ${maxOrdersToProcess} đơn trong ${numBatches} batch(es)`);
+
+    let allRunningOrders = [];
+
+    // Lấy orders theo batch với pagination
+    for (let batchIndex = 0; batchIndex < numBatches; batchIndex++) {
+      const skip = batchIndex * BATCH_SIZE;
+      const limit = Math.min(BATCH_SIZE, maxOrdersToProcess - skip);
+
+      console.log(`📥 Batch ${batchIndex + 1}/${numBatches}: skip=${skip}, limit=${limit}`);
+
+      const batchOrders = await Order.find({
+        status: { $in: ["Pending", "In progress", "Processing"] },
+        createdAt: { $gte: threeMonthsAgo },
+        ordertay: { $ne: true },
+        DomainSmm: { $exists: true }
+      })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // Filter cực kỳ an toàn: loại bỏ null, undefined, false, true, 0, '', {}, []
+      const validOrders = batchOrders.filter(o => {
+        const d = o.DomainSmm;
+        if (!d || typeof d === 'boolean' || typeof d === 'number' && d === 0) return false;
+        if (typeof d === 'string') return d.trim().length > 0;
+        if (Array.isArray(d)) return d.length > 0;
+        if (typeof d === 'object') return Object.keys(d).length > 0;
+        return true;
+      });
+
+      allRunningOrders = allRunningOrders.concat(validOrders);
+      console.log(`✓ Batch ${batchIndex + 1}: ${validOrders.length} đơn hợp lệ`);
+    }
+
+    const runningOrders = allRunningOrders;
+    console.log(`⏳ Tổng cộng ${runningOrders.length} đơn hợp lệ với DomainSmm.`);
 
     tongdon = runningOrders.length;
 
@@ -372,6 +400,12 @@ async function checkOrderStatus() {
           }
         });
 
+        // Arrays cho chunk hiện tại
+        const chunkOrdersToUpdate = [];
+        const chunkRefundsToInsert = [];
+        const chunkHistoriesToInsert = [];
+        const chunkUsersToUpdate = new Map();
+
         // Xử lý chỉ các order có dữ liệu trả về trong chunk
         for (const order of state.orders) {
           const key = order.orderId?.toString();
@@ -381,19 +415,33 @@ async function checkOrderStatus() {
           const mappedStatus = mapStatus(statusObj.status);
           const updateData = {};
 
-          if (mappedStatus) updateData.status = mappedStatus;
-          if (statusObj.start_count !== undefined) updateData.start = statusObj.start_count;
+          // Chỉ update status nếu thay đổi
+          if (mappedStatus && mappedStatus !== order.status) {
+            updateData.status = mappedStatus;
+          }
 
+          // Chỉ update start nếu thay đổi
+          if (statusObj.start_count !== undefined && statusObj.start_count !== order.start) {
+            updateData.start = statusObj.start_count;
+          }
+
+          // Tính dachay mới
+          let newDachay;
           if (['Pending', 'In progress', 'Processing'].includes(mappedStatus) && Number(statusObj.remains) === 0) {
-            updateData.dachay = 0;
+            newDachay = 0;
           } else if (statusObj.remains !== undefined) {
-            updateData.dachay = order.quantity - Number(statusObj.remains);
+            newDachay = order.quantity - Number(statusObj.remains);
+          }
+
+          // Chỉ update dachay nếu thay đổi
+          if (newDachay !== undefined && newDachay !== order.dachay) {
+            updateData.dachay = newDachay;
           }
 
           const user = userCache[order.username];
           if (!user) {
             if (Object.keys(updateData).length > 0) {
-              ordersToUpdate.push({ filter: { _id: order._id }, update: updateData });
+              chunkOrdersToUpdate.push({ filter: { _id: order._id }, update: updateData });
             }
             continue;
           }
@@ -419,7 +467,7 @@ async function checkOrderStatus() {
             }
 
             // Prepare refund
-            refundsToInsert.push({
+            chunkRefundsToInsert.push({
               updateOne: {
                 filter: { madon: order.Madon },
                 update: {
@@ -442,11 +490,15 @@ async function checkOrderStatus() {
             });
 
             if (isApproved) {
-              const userData = usersToUpdate.get(order.username) || { balance: user.balance, balanceChange: 0 };
+              const userData = chunkUsersToUpdate.get(order.username) || {
+                username: order.username,
+                balance: user.balance,
+                balanceChange: 0
+              };
               userData.balanceChange = (userData.balanceChange || 0) + soTienHoan;
-              usersToUpdate.set(order.username, userData);
+              chunkUsersToUpdate.set(order.username, userData);
 
-              historiesToInsert.push({
+              chunkHistoriesToInsert.push({
                 username: order.username,
                 madon: order.Madon,
                 hanhdong: "Hoàn tiền",
@@ -466,11 +518,61 @@ async function checkOrderStatus() {
             queueTelegramNotification(teleConfig, order, soTienHoan, chuachay, isApproved, phihoan);
           }
 
-          if (Object.keys(updateData).length > 0) {
-            ordersToUpdate.push({ filter: { _id: order._id }, update: updateData });
+          const existingOrder = order;
+          const isDifferent = Object.keys(updateData).some(key => updateData[key] !== existingOrder[key]);
+          if (isDifferent) {
+            chunkOrdersToUpdate.push({ filter: { _id: order._id }, update: updateData });
           }
 
           processedOrdersCount++;
+        }
+
+        // ===== LƯU DB NGAY SAU KHI XỬ LÝ XONG CHUNK =====
+        const chunkBulkPromises = [];
+
+        // Bulk update Orders cho chunk
+        if (chunkOrdersToUpdate.length > 0) {
+          const bulkOps = chunkOrdersToUpdate.map(({ filter, update }) => ({
+            updateOne: { filter, update: { $set: update } }
+          }));
+          chunkBulkPromises.push(Order.bulkWrite(bulkOps, { ordered: false }));
+        }
+
+        // Bulk upsert Refunds cho chunk
+        if (chunkRefundsToInsert.length > 0) {
+          chunkBulkPromises.push(Refund.bulkWrite(chunkRefundsToInsert, { ordered: false }));
+        }
+
+        // Bulk insert Histories cho chunk
+        if (chunkHistoriesToInsert.length > 0) {
+          chunkBulkPromises.push(HistoryUser.insertMany(chunkHistoriesToInsert, { ordered: false }));
+        }
+
+        // Bulk update Users cho chunk
+        const chunkUserBulkOps = [];
+        for (const [username, userData] of chunkUsersToUpdate.entries()) {
+          if (userData.balanceChange > 0) {
+            chunkUserBulkOps.push({
+              updateOne: {
+                filter: { username },
+                update: { $inc: { balance: userData.balanceChange } }
+              }
+            });
+
+            // Cập nhật global usersToUpdate để tracking đúng
+            const globalUserData = usersToUpdate.get(username) || { balance: userData.balance, balanceChange: 0 };
+            globalUserData.balanceChange = (globalUserData.balanceChange || 0) + userData.balanceChange;
+            usersToUpdate.set(username, globalUserData);
+          }
+        }
+        if (chunkUserBulkOps.length > 0) {
+          chunkBulkPromises.push(User.bulkWrite(chunkUserBulkOps, { ordered: false }));
+        }
+
+        // Execute all bulk operations cho chunk này
+        if (chunkBulkPromises.length > 0) {
+          await Promise.all(chunkBulkPromises);
+          console.log(`💾 [${groupKey}] Đã lưu ${chunkOrdersToUpdate.length} orders, ${chunkRefundsToInsert.length} refunds, ${chunkHistoriesToInsert.length} histories, ${chunkUserBulkOps.length} users`);
         }
 
         didWork = true;
@@ -483,46 +585,6 @@ async function checkOrderStatus() {
       }
     }
     // end while loop: all chunks processed
-
-    // ===== BULK OPERATIONS (Giảm queries xuống tối thiểu) =====
-    const bulkPromises = [];
-
-    // Bulk update Orders
-    if (ordersToUpdate.length > 0) {
-      const bulkOps = ordersToUpdate.map(({ filter, update }) => ({
-        updateOne: { filter, update: { $set: update } }
-      }));
-      bulkPromises.push(Order.bulkWrite(bulkOps, { ordered: false }));
-    }
-
-    // Bulk upsert Refunds
-    if (refundsToInsert.length > 0) {
-      bulkPromises.push(Refund.bulkWrite(refundsToInsert, { ordered: false }));
-    }
-
-    // Bulk insert Histories
-    if (historiesToInsert.length > 0) {
-      bulkPromises.push(HistoryUser.insertMany(historiesToInsert, { ordered: false }));
-    }
-
-    // Bulk update Users
-    const userBulkOps = [];
-    for (const [username, userData] of usersToUpdate.entries()) {
-      if (userData.balanceChange > 0) {
-        userBulkOps.push({
-          updateOne: {
-            filter: { username },
-            update: { $inc: { balance: userData.balanceChange } }
-          }
-        });
-      }
-    }
-    if (userBulkOps.length > 0) {
-      bulkPromises.push(User.bulkWrite(userBulkOps, { ordered: false }));
-    }
-
-    // Execute all bulk operations in parallel
-    await Promise.all(bulkPromises);
 
     totalProcessedOrders += processedOrdersCount;
     const elapsed = Math.round((Date.now() - checkStartTime) / 1000);
