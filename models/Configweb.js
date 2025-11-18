@@ -16,6 +16,8 @@ const configwebSchema = new mongoose.Schema({
   deleteOrders: { type: Boolean, default: false }, // xóa đơn hàng
   deleteUsers: { type: Boolean, default: false }, // xóa user
   deleteHistory: { type: Boolean, default: false }, // xóa lịch sử
+  headerJs: { type: String, default: "" }, // mã js header
+  footerJs: { type: String, default: "" }, // mã js footer
   lienhe: [
     {
       type: { type: String, default: "" },

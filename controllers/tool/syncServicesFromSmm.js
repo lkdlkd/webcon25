@@ -326,8 +326,8 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
             max: serviceData.max,
             cancel: serviceData.cancel ? "on" : "off",
             refil: serviceData.refill ? "on" : "off",
-            isActive: true,
-            status: true,
+            isActive: serviceData.isActive === true || serviceData.isActive === "on" ? true : false,
+            status: serviceData.status === true || serviceData.status === "on" ? true : false,
         });
 
         // Lưu vào cache

@@ -22,6 +22,8 @@ exports.getConfigweb = async (req, res) => {
         deleteUsers: false,
         deleteHistory: false,
         autoDeleteMonths: 3,
+        headerJs: "",
+        footerJs: "",
         lienhe: [
           {
             type: "",
@@ -46,18 +48,20 @@ exports.getConfigweb = async (req, res) => {
       distributor: config.distributor,
       lienhe: config.lienhe,
       domain: config.domain,
+      headerJs: config.headerJs,
+      footerJs: config.footerJs,
     };
 
     // Chỉ hiển thị viewluotban nếu user là admin
     const user = req.user;
     if (user && user.role === 'admin') {
-      responseData.viewluotban = config.viewluotban ;
-      responseData.autoactive = config.autoactive ;
-      responseData.autoremove = config.autoremove ;
-      responseData.autoDeleteMonths = config.autoDeleteMonths ;
-      responseData.deleteOrders = config.deleteOrders ;
-      responseData.deleteUsers = config.deleteUsers ;
-      responseData.deleteHistory = config.deleteHistory ;
+      responseData.viewluotban = config.viewluotban;
+      responseData.autoactive = config.autoactive;
+      responseData.autoremove = config.autoremove;
+      responseData.autoDeleteMonths = config.autoDeleteMonths;
+      responseData.deleteOrders = config.deleteOrders;
+      responseData.deleteUsers = config.deleteUsers;
+      responseData.deleteHistory = config.deleteHistory;
     }
 
     res.status(200).json({ success: true, data: responseData });
@@ -74,7 +78,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor , viewluotban , autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -105,6 +109,8 @@ exports.updateConfigweb = async (req, res) => {
     config.deleteOrders = deleteOrders !== undefined ? deleteOrders : config.deleteOrders || false; // Kiểm tra giá trị trống cho deleteOrders
     config.deleteUsers = deleteUsers !== undefined ? deleteUsers : config.deleteUsers || false; // Kiểm tra giá trị trống cho deleteUsers
     config.deleteHistory = deleteHistory !== undefined ? deleteHistory : config.deleteHistory || false; // Kiểm tra giá trị trống cho deleteHistory
+    config.headerJs = req.body.headerJs !== undefined ? req.body.headerJs : config.headerJs || "";
+    config.footerJs = req.body.footerJs !== undefined ? req.body.footerJs : config.footerJs || "";
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });
@@ -124,7 +130,7 @@ exports.manualDeleteOldData = async (req, res) => {
 
     // Import hàm xóa
     const { autoDeleteOldData } = require('../tool/autoDeleteOldData');
-    
+
     // Gọi hàm xóa (async nhưng không chờ để trả response ngay)
     autoDeleteOldData()
       .then(() => {
@@ -134,9 +140,9 @@ exports.manualDeleteOldData = async (req, res) => {
         console.error('❌ Lỗi khi xóa thủ công:', error);
       });
 
-    res.status(200).json({ 
-      success: true, 
-      message: 'Đã bắt đầu xóa dữ liệu cũ. Kiểm tra console để xem tiến trình.' 
+    res.status(200).json({
+      success: true,
+      message: 'Đã bắt đầu xóa dữ liệu cũ. Kiểm tra console để xem tiến trình.'
     });
   } catch (error) {
     console.error("Lỗi khi xóa dữ liệu:", error);

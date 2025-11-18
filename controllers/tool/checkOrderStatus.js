@@ -297,10 +297,10 @@ async function checkOrderStatus() {
           }
 
           const rawErr = res.error || res.err || res.Error;
-
+          const codeErr = res.code || res.status;
           // Nếu có error field hoặc response không chứa data hợp lệ
           if (rawErr) {
-            const code = rawErr?.response?.status;
+            const code = Number(codeErr) || 0;
             const errCode = typeof rawErr === 'string' ? rawErr : (rawErr?.code || rawErr?.error || rawErr?.name);
             const msg = typeof rawErr === 'string' ? rawErr : (rawErr?.message || '');
 
@@ -325,6 +325,10 @@ async function checkOrderStatus() {
             console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
             if (/incorrect.*order.*id/i.test(msg) || /incorrect.*order.*id/i.test(errCode)) {
               console.warn(`🚫 [${groupKey}] Bỏ chunk do order IDs không hợp lệ (${ids.length} IDs)`);
+              continue;
+            }
+            if (code === 500) {
+              console.warn(`🚫 [${groupKey}] Bỏ chunk do lỗi 500 từ server (${ids.length} IDs)`);
               continue;
             }
 
@@ -586,7 +590,7 @@ async function checkOrderStatus() {
 
     totalProcessedOrders += processedOrdersCount;
     const elapsed = Math.round((Date.now() - checkStartTime) / 1000);
-    console.log(`✅ Xử lý ${processedOrdersCount}/${runningOrders.length} đơn trong ${elapsed}s | Tổng: ${totalProcessedOrders}`);
+    console.log(`✅ Xử lý don hang ${processedOrdersCount}/${runningOrders.length} đơn trong ${elapsed}s | Còn lại: ${totalProcessedOrders < totalCount ? (totalCount - totalProcessedOrders) : 0} đơn`);
 
   } catch (err) {
     console.error("❌ Lỗi:", err.message);

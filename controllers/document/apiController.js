@@ -80,6 +80,7 @@ exports.getServiceswebcon = async (req, res) => {
                 thutucategory: service.category?.thutu || 0,
                 thututype: service.type?.thutu || 0,
                 isActive: service.isActive || false,
+                status: service.status || false,
             };
         });
 
@@ -222,8 +223,18 @@ exports.AddOrder = async (req, res) => {
         if (serviceFromDb.isActive === false) {
             throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
         }
-        const lai = totalCost - (apiRate * qty);
-        const tientieu = apiRate * qty;
+        // Nếu có chiết khấu hợp lệ, giảm số lượng gửi cho API
+        let apiQuantity = qty;
+        const discountRaw = serviceFromDb.chietkhau;
+        const discount = Number(discountRaw);
+        // Chỉ giảm khi discount hợp lệ và khác 0
+        if (!isNaN(discount) && discount !== 0) {
+            // discount > 0 → giảm số lượng
+            // discount < 0 → tăng số lượng
+            apiQuantity = Math.floor(qty * (100 - discount) / 100);
+        }
+        const tientieu = apiRate * apiQuantity;
+        const lai = totalCost - tientieu;
 
         let purchaseOrderId;
 
@@ -237,7 +248,7 @@ exports.AddOrder = async (req, res) => {
 
             const purchasePayload = {
                 link,
-                quantity: qty,
+                quantity: apiQuantity,
                 service: serviceFromDb.serviceId,
                 comments: formattedComments,
             };

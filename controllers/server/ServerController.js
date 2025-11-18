@@ -60,7 +60,7 @@ exports.addServer = async (req, res) => {
       ratevip,
       rateDistributor,
       Magoi: counter.value,
-    };  
+    };
 
     if (req.body.ordertay === true) {
       // Tìm hoặc tạo SmmSv "Đơn tay"
@@ -76,7 +76,7 @@ exports.addServer = async (req, res) => {
           ordertay: true,
         });
       }
-      
+
       // Tự động gán các trường với thông tin giả
       serviceData.DomainSmm = smmDonTay._id;
       serviceData.serviceName = serviceData.name || `Dịch vụ ${counter.value}`;
@@ -173,7 +173,8 @@ exports.getServer = async (req, res) => {
         refil: service.refil,
         cancel: service.cancel,
         ischeck: service.ischeck,
-        ordertay: service.ordertay
+        ordertay: service.ordertay,
+        chietkhau: service.chietkhau,
       }));
 
       return res.status(200).json({
@@ -187,9 +188,22 @@ exports.getServer = async (req, res) => {
         },
       });
     } else {
+      // let services = await Service.find({ isActive: true, status: true })
+      //   .populate("category", "name path thutu")
+      //   .populate("type", "name logo thutu");
       let services = await Service.find({ isActive: true, status: true })
-        .populate("category", "name path thutu")
-        .populate("type", "name logo thutu");
+        .populate({
+          path: "category",
+          select: "name path thutu",
+          match: { status: true }
+        })
+        .populate({
+          path: "type",
+          select: "name logo thutu",
+          match: { status: true }
+        });
+
+      services = services.filter(s => s.category && s.type);
 
       services = services.sort((a, b) => {
         const ta = a.type?.thutu ?? 999999;

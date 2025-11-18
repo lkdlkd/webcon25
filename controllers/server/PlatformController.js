@@ -8,12 +8,13 @@ exports.addPlatform = async (req, res) => {
       return res.status(403).json({ success: false, message: "Chỉ admin mới có quyền thực hiện thao tác này" });
     }
 
-    const { name, logo, thutu } = req.body;
+    const { name, logo, thutu , status } = req.body;
 
     const newPlatform = new Platform({
       name,
       logo,
       thutu,
+      status,
     });
 
     await newPlatform.save();
@@ -87,8 +88,15 @@ exports.deletePlatform = async (req, res) => {
 // Lấy danh sách platform (không cần admin, không phân trang)
 exports.getPlatforms = async (req, res) => {
   try {
+    const user = req.user;
     // Lấy tất cả các platform
-    const platforms = await Platform.find().sort({ thutu: 1, createdAt: 1 }); // Sử dụng _id thay vì id
+    let filter = {
+      status: true, // Chỉ lấy platform đang hoạt động
+    };
+    if (user.role === "admin") {
+      filter = {}; // Admin xem tất cả
+    }
+    const platforms = await Platform.find(filter).sort({ thutu: 1, createdAt: 1 }); // Sử dụng _id thay vì id
 
     res.status(200).json({
       success: true,

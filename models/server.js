@@ -22,6 +22,7 @@ const serviceSchema = new mongoose.Schema({
   Linkdv: { type: String, required: false },//facebook-like, tiktok-view... // ko tác dụng
   tocdodukien: { type: String, required: false },//tốc độ dự kiến
   luotban: { type: Number, default: 0 },//lượt bán
+  chietkhau: { type: Number, required: false , default: 0 },//chiết khấu %
   serviceId: { type: String, required: true },//sv ở bên thứ 3
   thutu: { type: String, required: false , default: 4 },// thứ tự
   //option

@@ -130,8 +130,15 @@ exports.deleteCategory = async (req, res) => {
 // Lấy danh sách category (không cần admin)
 exports.getCategories = async (req, res) => {
   try {
+    const user = req.user;
+    let filter = {
+      status: true, // Chỉ lấy platform đang hoạt động
+    };
+    if (user.role === "admin") {
+      filter = {}; // Admin xem tất cả
+    }
     // Lấy tất cả categories, populate platforms_id
-    const categories = await Category.find()
+    const categories = await Category.find(filter)
       .populate({
         path: "platforms_id",
         select: "name logo",
@@ -140,7 +147,7 @@ exports.getCategories = async (req, res) => {
       .sort({ thutu: 1, createdAt: 1 });
 
     // Lấy tất cả platforms theo thứ tự thutu tăng dần, nếu không có thutu thì theo createdAt
-    const platforms = await Platform.find().sort({ thutu: 1, createdAt: 1 });
+    const platforms = await Platform.find(filter).sort({ thutu: 1, createdAt: 1 });
 
     // Gắn categories vào từng platform
     const platformsWithCategories = platforms.map((platform) => {
