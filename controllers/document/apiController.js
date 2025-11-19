@@ -60,7 +60,7 @@ exports.getServiceswebcon = async (req, res) => {
             const rateForUser = getEffectiveRate(service, user);
             return {
                 service: Number(service.Magoi),
-                name: `${service.maychu} ${service.name}`,
+                name: service.name,
                 type: service.comment === "on" ? "Custom Comments" : "Default",
                 platform: service.type?.name || "không xác định",
                 category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
