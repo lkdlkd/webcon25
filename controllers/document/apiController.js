@@ -80,7 +80,7 @@ exports.getServiceswebcon = async (req, res) => {
                 thutucategory: service.category?.thutu || 0,
                 thututype: service.type?.thutu || 0,
                 isActive: service.isActive || false,
-                status: service.status || false,
+                status: service.status || true,
             };
         });
 
