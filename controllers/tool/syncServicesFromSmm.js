@@ -391,8 +391,10 @@ async function syncServicesFromSmmSource(smmSv) {
         });
         console.log(`💾 Đã load ${existingServices.length} services vào cache`);
 
+        const apiServiceIds = new Set();
         let created = 0;
         let updated = 0;
+        let deleted = 0;
         let errors = 0;
 
         // Xử lý từng service
@@ -403,6 +405,14 @@ async function syncServicesFromSmmSource(smmSv) {
                     errors++;
                     continue;
                 }
+
+                const numericServiceId = Number(serviceData.service);
+                if (!numericServiceId) {
+                    errors++;
+                    continue;
+                }
+
+                apiServiceIds.add(numericServiceId);
 
                 // 1. Tìm hoặc tạo Platform
                 const platform = await findOrCreatePlatform(
@@ -434,9 +444,28 @@ async function syncServicesFromSmmSource(smmSv) {
             }
         }
 
+        // Xóa dịch vụ không còn tồn tại ở nguồn
+        for (const existingService of existingServices) {
+            const existingId = Number(existingService.serviceId);
+            if (!existingId || apiServiceIds.has(existingId)) {
+                continue;
+            }
+
+            try {
+                await Service.deleteOne({ _id: existingService._id });
+                serviceCache.delete(`${smmSv._id}_${existingService.serviceId}`);
+                deleted++;
+                console.log(`🗑️ Đã xóa service không còn ở nguồn: ${existingService.name} (${existingService.Magoi})`);
+            } catch (deleteErr) {
+                errors++;
+                console.error(`❌ Không thể xóa service ${existingService.name}:`, deleteErr.message);
+            }
+        }
+
         console.log(`\n✅ Hoàn thành đồng bộ từ ${smmSv.name || smmSv.url_api}`);
         console.log(`   - Tạo mới: ${created} services`);
         console.log(`   - Cập nhật: ${updated} services`);
+        console.log(`   - Xóa: ${deleted} services`);
         console.log(`   - Lỗi: ${errors} services`);
 
     } catch (error) {
