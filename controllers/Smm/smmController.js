@@ -40,6 +40,7 @@ exports.createPartner = async (req, res) => {
         if (!user || user.role !== "admin") {
             return res.status(403).json({ error: "Chỉ admin mới có quyền sử dụng chức năng này" });
         }
+        
         const newPartner = new SmmSv(req.body);
         await newPartner.save();
         res.status(201).json({ message: "Đã thêm đối tác SMM thành công!", data: newPartner });
