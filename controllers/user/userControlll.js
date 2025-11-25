@@ -68,10 +68,7 @@ exports.login = async (req, res) => {
 
     // Lưu lịch sử đăng nhập vào mảng loginHistory
     // Ưu tiên lấy IP từ header X-User-IP (IP thật từ client), sau đó mới dùng x-forwarded-for
-    const ip = req.headers['x-user-ip'] ||
-      (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-      req.connection.remoteAddress ||
-      null;
+    const ip = req.headers['x-user-ip'] ||(req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||req.connection.remoteAddress ||null;
     const userAgent = req.headers['user-agent'] || '';
     user.loginHistory = user.loginHistory || [];
     user.loginHistory.push({ ip, agent: userAgent, time: new Date() });
@@ -79,7 +76,7 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       { username: user.username, userId: user._id, role: user.role },
       process.env.secretKey,
-      { expiresIn: '7d' }
+      { expiresIn: '30d' }
     );
 
     // Nếu là admin, gửi thông báo Telegram

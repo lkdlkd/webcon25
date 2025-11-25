@@ -142,6 +142,7 @@ exports.getServer = async (req, res) => {
         _id: service._id,
         // Sử dụng optional chaining để tránh lỗi khi không có DomainSmm được populate
         DomainSmm: service.DomainSmm?.name || "Không xác định",
+        DomainSmmId: service.DomainSmm ? service.DomainSmm._id : null,
         serviceName: service.serviceName,
         originalRate: service.originalRate,
         category: service.category ? service.category.name : "Không xác định",
@@ -152,6 +153,8 @@ exports.getServer = async (req, res) => {
         name: service.name,
         // Tránh lỗi khi category có thể không tồn tại
         path: service.category?.path || "",
+        typeId: service.type ? service.type._id : null,
+        categoryId: service.category ? service.category._id : null,
         rate: service.rate,
         ratevip: service.ratevip,
         rateDistributor: service.rateDistributor,
