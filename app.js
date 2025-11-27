@@ -24,6 +24,7 @@ const path = require('path');
 global.__basedir = path.resolve(__dirname);
 
 
+
 // Cấu hình CORS cho các API khác
 // Cho phép cả http và https cho domain cấu hình trong URL_WEBSITE (bỏ qua tiền tố www.)
 const rawAllowed = process.env.URL_WEBSITE || '';
