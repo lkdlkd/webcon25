@@ -1,0 +1,989 @@
+const axios = require('axios');
+const jwt = require('jsonwebtoken');
+const Service = require('../../models/server');
+const Order = require('../../models/Order');
+const HistoryUser = require('../../models/History');
+const User = require('../../models/User');
+const SmmSv = require("../../models/SmmSv");
+const SmmApiService = require('../Smm/smmServices'); // Giả sử bạn có một lớp để xử lý API SMM
+const Telegram = require('../../models/Telegram');
+const Counter = require('../../models/Counter');
+// Helper: lấy đơn giá theo cấp bậc user
+function getEffectiveRate(service, user) {
+    try {
+        const base = Number(service?.rate || 0);
+        const vip = Number(service?.ratevip || 0);
+        const distributor = Number(service?.rateDistributor || 0);
+        const level = (user?.capbac || 'member').toLowerCase();
+        if (level === 'vip' && vip > 0) return vip;
+        if (level === 'distributor' && distributor > 0) return distributor;
+        return base;
+    } catch (_) {
+        return Number(service?.rate || 0);
+    }
+}
+
+/* Hàm lấy danh sách dịch vụ */
+exports.getServiceswebcon = async (req, res) => {
+    try {
+        const { key } = req.body;
+        // Kiểm tra xem token có được gửi không
+        // Kiểm tra xem token có được gửi không
+        if (!key) {
+            return res.status(400).json({ success: false, error: "Token không được bỏ trống" });
+        }
+        // Lấy user từ DB dựa trên userId từ decoded token
+        const user = await User.findOne({ apiKey: key });
+        if (!user) {
+            res.status(404).json({ error: 'Người dùng không tồn tại' });
+            return null;
+        }
+
+        // So sánh token trong header với token đã lưu của user
+        if (user.apiKey !== key) {
+            res.status(401).json({ error: 'api Key không hợp lệ1' });
+            return null;
+        }
+        // Kiểm tra trạng thái người dùng trong CSDL (ví dụ: 'active')
+        if (!user) {
+            return res.status(404).json({ success: false, error: "Không tìm thấy người dùng" });
+        }
+        if (user.status && user.status !== 'active') {
+            return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
+        }
+        // Lấy danh sách dịch vụ từ CSDL
+        const services = await Service.find()
+            .populate("category", "name path thutu")
+            .populate("type", "name thutu"); // Lấy thông tin của Platform
+        // Định dạng các trường cần hiển thị với giá theo cấp bậc
+        const formattedServices = services.map(service => {
+            const rateForUser = getEffectiveRate(service, user);
+            return {
+                service: Number(service.Magoi),
+                name: service.name,
+                type: service.comment === "on" ? "Custom Comments" : "Default",
+                platform: service.type?.name || "không xác định",
+                category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
+                rate: rateForUser,
+                description: service.description || "",
+                min: service.min,
+                max: service.max,
+                cancel: service.cancel === "on",
+                refill: service.refil === "on",
+                tocdodukien: service.tocdodukien || "",
+                maychu: service.maychu || "",
+                luotban: service.luotban || 0,
+                thutu: service.thutu || "",
+                getid: service.getid === "on",
+                comment: service.comment === "on",
+                path: service.category?.path || "",
+                thutucategory: service.category?.thutu || 0,
+                thututype: service.type?.thutu || 0,
+                isActive: service.isActive || false,
+                status: service.status || true,
+            };
+        });
+
+        return res.status(200).json(formattedServices);
+    } catch (error) {
+        console.error("Lỗi khi lấy danh sách dịch vụ:", error);
+        return res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách dịch vụ',
+            error: error.message
+        });
+    }
+};
+exports.getServices = async (req, res) => {
+    try {
+        const { key } = req.body;
+        // Kiểm tra xem token có được gửi không
+        // Kiểm tra xem token có được gửi không
+        if (!key) {
+            return res.status(400).json({ success: false, error: "Token không được bỏ trống" });
+        }
+        // Lấy user từ DB dựa trên userId từ decoded token
+        const user = await User.findOne({ apiKey: key });
+        if (!user) {
+            res.status(404).json({ error: 'Người dùng không tồn tại' });
+            return null;
+        }
+
+        // So sánh token trong header với token đã lưu của user
+        if (user.apiKey !== key) {
+            res.status(401).json({ error: 'api Key không hợp lệ1' });
+            return null;
+        }
+        // Kiểm tra trạng thái người dùng trong CSDL (ví dụ: 'active')
+        if (!user) {
+            return res.status(404).json({ success: false, error: "Không tìm thấy người dùng" });
+        }
+        if (user.status && user.status !== 'active') {
+            return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
+        }
+        // Lấy danh sách dịch vụ từ CSDL
+        const services = await Service.find({ isActive: true })
+            .populate("category", "name")
+            .populate("type", "name"); // Lấy thông tin của Platform
+        // Định dạng các trường cần hiển thị với giá theo cấp bậc
+        const formattedServices = services.map(service => {
+            const rateForUser = getEffectiveRate(service, user);
+            return {
+                service: Number(service.Magoi),
+                name: `${service.maychu} ${service.name}`,
+                type: service.comment === "on" ? "Custom Comments" : "Default",
+                platform: service.type?.name || "không xác định",
+                category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
+                rate: rateForUser / 25,
+                min: service.min,
+                max: service.max,
+                cancel: service.cancel === "on",
+                refill: service.refil === "on",
+            };
+        });
+
+        return res.status(200).json(formattedServices);
+    } catch (error) {
+        console.error("Lỗi khi lấy danh sách dịch vụ:", error);
+        return res.status(500).json({
+            success: false,
+            message: 'Lỗi khi lấy danh sách dịch vụ',
+            error: error.message
+        });
+    }
+};
+async function fetchSmmConfig(domain) {
+    const smmSvConfig = await SmmSv.findById(domain);
+    if (!smmSvConfig || !smmSvConfig.url_api || !smmSvConfig.api_token) {
+        throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+    }
+    return smmSvConfig;
+}
+
+async function fetchServiceData(magoi) {
+    const serviceFromDb = await Service.findOne({ Magoi: magoi }).populate("category", "name").populate("DomainSmm", "name").populate("type", "name");
+    if (!serviceFromDb) throw new Error('Dịch vụ không tồn tại');
+    return serviceFromDb;
+}
+exports.AddOrder = async (req, res) => {
+    // Lấy token từ req.body
+    const { key, service, link, quantity, comments } = req.body;
+    const magoi = service;
+
+    if (!key) {
+        return res.status(400).json({ error: "Token không được bỏ trống" });
+    }
+    const user = await User.findOne({ apiKey: key });
+    if (!user) {
+        res.status(404).json({ error: 'Người dùng không tồn tại' });
+        return null;
+    }
+    if (user.apiKey !== key) {
+        res.status(401).json({ error: 'api Key không hợp lệ' });
+        return null;
+    }
+    if (user.status && user.status !== 'active') {
+        return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
+    }
+    if (!magoi || !link || !quantity) {
+        return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (service, link, quantity)' });
+    }
+    const username = user.username
+    const qty = Number(quantity);
+    const formattedComments = comments ? comments.replace(/\r?\n/g, "\r\n") : "";
+
+    try {
+        // --- Bước 1: Lấy thông tin dịch vụ từ CSDL ---
+        const serviceFromDb = await fetchServiceData(magoi);
+
+        // Tính tổng chi phí và làm tròn 2 số thập phân
+        const rateForUser = getEffectiveRate(serviceFromDb, user);
+        const totalCost = rateForUser * qty; // Kết quả: 123.4
+        const apiRate = serviceFromDb.originalRate; // Giá gốc từ nguồn
+
+        // Kiểm tra nếu là đơn tay (ordertay = true)
+        const isManualOrder = serviceFromDb.ordertay === true ? true : false;
+
+        if (!isManualOrder) {
+            // Chỉ kiểm tra giá nếu ischeck = true
+            if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
+                throw new Error('Lỗi khi mua dịch vụ, vui lòng ib admin');
+            }
+        }
+
+        if (!serviceFromDb.isActive) {
+            throw new Error("Dịch vụ bảo trì, vui lòng mua sv khác");
+        }
+        if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
+            throw new Error('Số lượng không hợp lệ');
+        }
+        if (user.balance < totalCost) {
+            throw new Error('Số dư không đủ để thực hiện giao dịch');
+        }
+        if (serviceFromDb.isActive === false) {
+            throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
+        }
+        // Nếu có chiết khấu hợp lệ, giảm số lượng gửi cho API
+        let apiQuantity = qty;
+        const discountRaw = serviceFromDb.chietkhau;
+        const discount = Number(discountRaw);
+        // Chỉ giảm khi discount hợp lệ và khác 0
+        if (!isNaN(discount) && discount !== 0) {
+            // discount > 0 → giảm số lượng
+            // discount < 0 → tăng số lượng
+            apiQuantity = Math.floor(qty * (100 - discount) / 100);
+        }
+        const tientieu = apiRate * apiQuantity;
+        const lai = totalCost - tientieu;
+
+        let purchaseOrderId;
+
+        if (isManualOrder) {
+            // Đơn tay: tạo orderId ngẫu nhiên
+            purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
+        } else {
+            // Đơn API: gửi yêu cầu mua dịch vụ qua API bên thứ 3
+            const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
+            const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
+
+            const purchasePayload = {
+                link,
+                quantity: apiQuantity,
+                service: serviceFromDb.serviceId,
+                comments: formattedComments,
+            };
+
+            const purchaseResponse = await smm.order(purchasePayload);
+            if (!purchaseResponse || !purchaseResponse.order) {
+                const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+
+                if (nestedError) {
+                    console.error('Đối tác trả về lỗi', nestedError);
+                    const errRaw = String(nestedError);
+                    const errStr = errRaw.toLowerCase();
+                    // Nhạy cảm: số dư, đường link, số điện thoại VN
+                    const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
+                    const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
+                    const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
+                        || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
+                    if (isSensitive) {
+                        throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+                    } else {
+                        throw new Error(String(nestedError));
+                    }
+                } else {
+                    throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+                }
+            }
+
+            purchaseOrderId = purchaseResponse.order;
+        }
+
+        // --- Bước 5: Trừ số tiền vào tài khoản người dùng ---
+        const newBalance = user.balance - totalCost;
+        user.balance = newBalance;
+        await user.save();
+
+        // Lấy mã đơn từ Counter (tự động tăng)
+        let counter = await Counter.findOne({ name: 'orderCounter' });
+
+        if (!counter) {
+            // Lần đầu tiên: lấy mã đơn lớn nhất từ Order
+            const lastOrder = await Order.findOne({}).sort({ Madon: -1 });
+            const maxMadon = lastOrder && lastOrder.Madon ? Number(lastOrder.Madon) : 9999;
+
+            // Khởi tạo counter với giá trị tiếp theo
+            counter = await Counter.create({
+                name: 'orderCounter',
+                value: maxMadon + 1
+            });
+        } else {
+            // Tăng counter và lấy giá trị mới
+            counter = await Counter.findOneAndUpdate(
+                { name: 'orderCounter' },
+                { $inc: { value: 1 } },
+                { new: true }
+            );
+        }
+
+        const newMadon = counter.value;
+
+        // --- Bước 7: Tạo đối tượng đơn hàng và lưu vào CSDL ---
+        const createdAt = new Date();
+        // Xây dựng ObjectLink cho dịch vụ facebook (nếu áp dụng)
+        let objectLinkForStore = "";
+        try {
+            if (serviceFromDb.type && serviceFromDb.type.name) {
+                const platformRaw = serviceFromDb.type.name.toLowerCase();
+                const isFacebook = platformRaw.includes('facebook') || platformRaw === 'fb' || platformRaw.includes(' fb');
+                const isTiktok = platformRaw.includes('tiktok') || platformRaw === 'tt';
+                const isInstagram = platformRaw.includes('instagram') || platformRaw === 'ig';
+                const raw = (link || '').trim();
+                if (!raw) {
+                    // nothing
+                } else if (isFacebook) {
+                    if (/^https?:\/\//i.test(raw)) {
+                        objectLinkForStore = raw.replace(/^https?:\/\/(facebook\.com)/i, 'https://www.facebook.com');
+                    } else if (/^facebook\.com\//i.test(raw)) {
+                        objectLinkForStore = 'https://www.' + raw;
+                    } else if (/^fb\.com\//i.test(raw)) {
+                        objectLinkForStore = 'https://www.' + raw.replace(/^fb\.com/i, 'facebook.com');
+                    } else {
+                        const cleaned = raw.replace(/^\/+/, '');
+                        objectLinkForStore = 'https://www.facebook.com/' + cleaned;
+                    }
+                } else if (isTiktok) {
+                    if (/^https?:\/\//i.test(raw)) {
+                        objectLinkForStore = raw;
+                    } else if (/^tiktok\.com\//i.test(raw)) {
+                        objectLinkForStore = 'https://' + raw;
+                    } else {
+                        let cleaned = raw.replace(/^\/+/, '');
+                        if (cleaned.startsWith('@')) cleaned = cleaned; // keep @ for tiktok
+                        else if (!/\//.test(cleaned)) cleaned = '@' + cleaned; // plain username
+                        objectLinkForStore = 'https://www.tiktok.com/' + cleaned;
+                    }
+                } else if (isInstagram) {
+                    if (/^https?:\/\//i.test(raw)) {
+                        objectLinkForStore = raw;
+                    } else if (/^instagram\.com\//i.test(raw)) {
+                        objectLinkForStore = 'https://' + raw;
+                    } else {
+                        let cleaned = raw.replace(/^\/+/, '');
+                        if (cleaned.startsWith('@')) cleaned = cleaned.slice(1);
+                        objectLinkForStore = 'https://www.instagram.com/' + cleaned.replace(/\/+$/, '');
+                    }
+                }
+            }
+        } catch (_) { /* ignore build object link error */ }
+
+        const orderData = new Order({
+            Madon: newMadon,
+            Magoi: serviceFromDb.Magoi,
+            username,
+            SvID: serviceFromDb.serviceId,
+            orderId: purchaseOrderId,
+            namesv: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
+            category: serviceFromDb.category.name || "Không xác định",
+            link,
+            start: 0,
+            quantity: qty,
+            rate: rateForUser,
+            totalCost,
+            createdAt,
+            ObjectLink: objectLinkForStore || link,
+            status: 'Pending',
+            note: "api/v2",
+            comments: formattedComments,
+            DomainSmm: serviceFromDb.DomainSmm,
+            lai: lai,
+            tientieu: tientieu,
+            refil: serviceFromDb.refil,
+            cancel: serviceFromDb.cancel,
+            ordertay: isManualOrder,
+        });
+
+        const HistoryData = new HistoryUser({
+            username,
+            madon: newMadon,
+            hanhdong: 'Tạo đơn hàng',
+            link,
+            tienhientai: user.balance + totalCost,
+            tongtien: totalCost,
+            tienconlai: newBalance,
+            createdAt,
+            mota: `Tăng ${serviceFromDb.maychu} ${serviceFromDb.name} thành công cho uid ${link}`,
+        });
+        await Service.findOneAndUpdate(
+            { Magoi: serviceFromDb.Magoi },
+            { $inc: { luotban: 1 } },
+            { new: true }
+        );
+        await orderData.save();
+        await HistoryData.save();
+
+        // --- Bước 8: Gửi thông báo về Telegram ---
+        // Lấy cấu hình Telegram từ DB
+        const teleConfig = await Telegram.findOne();
+        if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+            // Giờ Việt Nam (UTC+7)
+            const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+            const telegramMessage =
+                `📌 *Đơn hàng mới đã được tạo thông qua API*!*\n` +
+                `👤 *Khách hàng:* ${username}\n` +
+                `🆔 *Mã đơn:* ${newMadon}\n` +
+                `🔹 *Dịch vụ:* ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
+                `🔗 *Link:* ${link}\n` +
+                `🔸 *Rate:* ${rateForUser}\n` +
+                `📌 *Số lượng:* ${qty}\n` +
+                `💰 *Tiền cũ:* ${Number(Math.floor(Number(user.balance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
+                `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +
+                `💰 *Tiền còn lại:* ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
+                `📆 *Ngày tạo:* ${createdAtVN.toLocaleString("vi-VN", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                })}\n` +
+                `📝 *Ghi chú:* ${'api/v2'}\n` +
+                `Nguồn: ${serviceFromDb.DomainSmm.name}`;
+            await sendTelegramNotification({
+                telegramBotToken: teleConfig.botToken,
+                telegramChatId: teleConfig.chatId,
+                message: telegramMessage,
+            });
+        }
+        res.status(200).json({ order: newMadon });
+    } catch (error) {
+        // Nếu có lỗi từ provider, ưu tiên trả message của provider nhưng ẩn thông tin nhạy cảm
+        const providerMsgRaw = error?.response?.data?.error || error?.message || '';
+        const providerMsg = String(providerMsgRaw || '');
+        const msgLower = providerMsg.toLowerCase();
+        const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
+        const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
+        const sensitive = msgLower.includes('balance') || msgLower.includes('xu') || msgLower.includes('tiền')
+            || urlRegex.test(providerMsg) || phoneRegexVN.test(providerMsg);
+        const safeMessage = sensitive || !providerMsg ? 'Lỗi khi mua dịch vụ, vui lòng thử lại' : providerMsg;
+        res.status(500).json({ error: safeMessage });
+    }
+};
+
+async function sendTelegramNotification(data) {
+    const { telegramBotToken, telegramChatId, message } = data;
+    if (telegramBotToken && telegramChatId) {
+        try {
+            await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+                chat_id: telegramChatId,
+                text: message,
+            });
+            console.log('Thông báo Telegram đã được gửi.');
+        } catch (error) {
+            console.error('Lỗi gửi thông báo Telegram:', error.message);
+        }
+    } else {
+        console.log('Thiếu thông tin cấu hình Telegram.');
+    }
+}
+
+/* Hàm lấy danh sách dịch vụ */
+exports.getOrderStatus = async (req, res) => {
+    try {
+        const { key, order, orders } = req.body;
+
+        // Kiểm tra xem API key có được gửi không
+        if (!key) {
+            return res.status(400).json({ error: "Token không được bỏ trống" });
+        }
+
+        // Tìm user dựa trên apiKey
+        const user = await User.findOne({ apiKey: key });
+        if (!user) {
+            return res.status(404).json({ error: "Người dùng không tồn tại" });
+        }
+
+        // Kiểm tra trạng thái người dùng
+        if (user.status && user.status !== 'active') {
+            return res.status(403).json({ error: "Người dùng không hoạt động" });
+        }
+
+        // Xử lý trường hợp có `orders` hoặc `order`
+        let orderNumbers = [];
+
+        if (orders) {
+            // `orders` là danh sách đơn hàng, giới hạn tối đa 100 đơn
+            orderNumbers = Array.isArray(orders)
+                ? orders.map(num => Number(num))
+                : orders.split(',').map(num => Number(num.trim()));
+
+            // Giới hạn tối đa 100 đơn
+            if (orderNumbers.length > 100) {
+                return res.status(400).json({ error: "Chỉ được kiểm tra tối đa 100 đơn hàng mỗi lần" });
+            }
+        } else if (order) {
+            // `order` là danh sách hoặc một đơn duy nhất
+            orderNumbers = [Number(order)];
+
+        } else {
+            return res.status(400).json({ error: "Danh sách đơn hàng không được bỏ trống" });
+        }
+
+        // Lấy các đơn hàng từ DB
+        const orderDocs = await Order.find({
+            Madon: { $in: orderNumbers },
+            // username: user.username // Kiểm tra đơn hàng có thuộc về user không
+        });
+        if (orders) {
+            // Nếu có `orders`, trả về object với `Madon` làm key
+            const formattedOrders = {};
+            orderDocs.forEach(order => {
+                if (order.username === user.username) {
+                    formattedOrders[order.Madon] = {
+                        charge: order.totalCost / 25000,
+                        start_count: order.start,
+                        status: order.status,
+                        remains: order.quantity - order.dachay,
+                        currency: "USD",
+                    };
+                }
+                else {
+                    formattedOrders[order.Madon] = {
+                        error: "Incorrect order ID"
+                    };
+                }
+            });
+            return res.status(200).json(formattedOrders);
+        }
+        // Giả sử orderDocs là mảng các đơn hàng từ DB
+        if (orderDocs.length > 0) {
+            const firstOrder = orderDocs[0];
+            let formattedOrder;
+            if (firstOrder.username === user.username) {
+                formattedOrder = {
+                    charge: firstOrder.totalCost / 25000,
+                    start_count: firstOrder.start,
+                    status: firstOrder.status,
+                    remains: firstOrder.quantity - firstOrder.dachay,
+                    currency: "USD",
+                };
+            } else {
+                formattedOrder = { order: firstOrder.Madon, error: "Incorrect order ID" };
+            }
+            return res.status(200).json(formattedOrder);
+        } else {
+            return res.status(200).json({ order: firstOrder.Madon, error: "Incorrect order ID" });
+        }
+
+
+        return res.status(200).json(formattedList);
+
+
+        // Nếu có `order`, trả về danh sách
+
+    } catch (error) {
+        console.error("Lỗi khi lấy trạng thái đơn:", error);
+        return res.status(500).json({
+            error: "Lỗi khi lấy trạng thái đơn",
+        });
+    }
+};
+exports.cancelOrder = async (req, res) => {
+    try {
+        const { key, order, orders } = req.body;
+        if (!key) return res.status(400).json({ error: 'Thiếu api key' });
+        const user = await User.findOne({ apiKey: key });
+        if (!user) return res.status(401).json({ error: 'Không tìm thấy người dùng' });
+        // Xác định danh sách đơn cần hủy
+        let orderList = [];
+        if (orders) {
+            orderList = Array.isArray(orders) ? orders : orders.split(',').map(o => o.trim());
+            // Giới hạn tối đa 100 đơn
+            if (orderList.length > 100) {
+                return res.status(400).json({ error: "Chỉ được hủy tối đa 100 đơn hàng mỗi lần" });
+            }
+        } else if (order) {
+            orderList = [order];
+        } else {
+            return res.status(400).json({ error: 'Thiếu mã đơn' });
+        }
+        // Kết quả trả về cho từng đơn
+        const results = [];
+        for (const madon of orderList) {
+            let result = { order: Number(madon) };
+            try {
+                const ordersDoc = await Order.findOne({ Madon: madon });
+                if (!ordersDoc) {
+                    result.cancel = { error: 'Incorrect order ID' };
+                    results.push(result);
+                    continue;
+                }
+                if (ordersDoc.iscancel) {
+                    result.cancel = { error: 'Đơn hàng đã được hủy' };
+                    results.push(result);
+                    continue;
+                }
+                if (ordersDoc.status === "Completed") {
+                    result.cancel = { error: 'Đơn hàng đã hoàn thành không thể hủy' };
+                    results.push(result);
+                    continue;
+                }
+                if (ordersDoc.status === "Partial" || ordersDoc.status === "Canceled") {
+                    result.cancel = { error: 'Đơn hàng đã được hủy' };
+                    results.push(result);
+                    continue;
+                }
+                if (ordersDoc.cancel !== "on") {
+                    result.cancel = { error: 'Đơn hàng không hỗ trợ hủy' };
+                    results.push(result);
+                    continue;
+                }
+                // Kiểm tra quyền hủy đơn
+                if (user.role !== 'admin' && ordersDoc.username !== user.username) {
+                    result.cancel = { error: 'Đơn hàng không thể hủy' };
+                    results.push(result);
+                    continue;
+                }
+                // Kiểm tra nếu là đơn tay (ordertay = true)
+                const isManualOrder = ordersDoc.ordertay === true;
+
+                if (isManualOrder) {
+                    const createdAt = new Date();
+                    // Đơn tay: hủy trực tiếp không cần gọi API
+                    const historyData = new HistoryUser({
+                        username: ordersDoc.username,
+                        madon: ordersDoc.Madon,
+                        hanhdong: "Hủy đơn",
+                        link: ordersDoc.link,
+                        tienhientai: user.balance,
+                        tongtien: 0,
+                        tienconlai: user.balance,
+                        createdAt: new Date(),
+                        mota: `Hủy đơn dịch vụ ${ordersDoc.namesv} uid => ${ordersDoc.link}`,
+                    });
+                    await historyData.save();
+                    ordersDoc.iscancel = true;
+                    await ordersDoc.save();
+                    const teleConfig = await Telegram.findOne();
+                    if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                        // Giờ Việt Nam (UTC+7)
+                        const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                        const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n\n🆔 
+                                Mã đơn: ${order.Madon}\n👤 
+                                Khách hàng: ${ordersDoc.username}\n📱 
+                                Dịch vụ: ${ordersDoc.namesv}\n🔗 
+                                Link/UID: ${ordersDoc.link}\n⏰ 
+                                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                        await sendTelegramNotification({
+                            telegramBotToken: teleConfig.botToken,
+                            telegramChatId: teleConfig.chatId,
+                            message: telegramMessage,
+                        });
+                    }
+                    return res.json({ success: true, message: 'Đơn hàng đã được hủy thành công' });
+                }
+                // Lấy config SmmSv theo domain
+                const smmConfig = await SmmSv.findById(ordersDoc.DomainSmm);
+                if (!smmConfig) {
+                    result.cancel = { error: 'Đơn hàng không thể hủy' };
+                    results.push(result);
+                    continue;
+                }
+                // Tạo instance SmmApiService
+                const smmApi = new SmmApiService(smmConfig.url_api, smmConfig.api_token);
+                // Gọi hàm cancel đến API thứ 3
+                let apiResult = await smmApi.cancel2(ordersDoc.orderId);
+                let cancelError = null;
+                if (Array.isArray(apiResult)) {
+                    cancelError = apiResult[0]?.cancel?.error;
+                } else if (apiResult.error) {
+                    cancelError = apiResult.error;
+                }
+                // Nếu lỗi thì thử gọi cancel
+                if (cancelError) {
+                    let apiResult2 = await smmApi.cancel([ordersDoc.orderId]);
+                    let cancelError2 = null;
+                    if (apiResult2) {
+                        if (Array.isArray(apiResult2)) {
+                            cancelError2 = apiResult2[0]?.cancel?.error;
+                        } else if (apiResult2.error) {
+                            cancelError2 = apiResult2.error;
+                        }
+                    } else {
+                        cancelError2 = 'đơn hàng không thể hủy';
+                    }
+                    if (cancelError2) {
+                        result.cancel = { error: 'đơn hàng không thể hủy' };
+                        results.push(result);
+                        continue;
+                    }
+                }
+                // cancel thành công
+                const historyData = new HistoryUser({
+                    username: ordersDoc.username,
+                    madon: ordersDoc.Madon,
+                    hanhdong: "Hủy đơn",
+                    link: ordersDoc.link,
+                    tienhientai: user.balance,
+                    tongtien: 0,
+                    tienconlai: user.balance,
+                    createdAt: new Date(),
+                    mota: `Hủy đơn dịch vụ ${ordersDoc.namesv} uid => ${ordersDoc.link}`,
+                });
+                await historyData.save();
+                ordersDoc.iscancel = true;
+                await ordersDoc.save();
+                result.cancel = 1;
+                results.push(result);
+            } catch (err) {
+                result.cancel = { error: 'Lỗi liên hệ admin!' };
+                results.push(result);
+            }
+        }
+        return res.json(results);
+    } catch (err) {
+        res.status(500).json({ error: 'Lỗi liên hệ admin!' });
+    }
+};
+
+exports.refillOrder = async (req, res) => {
+    try {
+        const { key, order, orders } = req.body;
+        if (!key) return res.status(400).json({ error: 'Thiếu api key' });
+        const user = await User.findOne({ apiKey: key });
+        if (!user) return res.status(401).json({ error: 'Không tìm thấy người dùng' });
+
+        // Xác định danh sách đơn cần bảo hành
+        let orderList = [];
+        if (orders) {
+            orderList = Array.isArray(orders) ? orders : orders.split(',').map(o => o.trim());
+            // Giới hạn tối đa 100 đơn
+            if (orderList.length > 100) {
+                return res.status(400).json({ error: "Chỉ được bảo hành tối đa 100 đơn hàng mỗi lần" });
+            }
+        } else if (order) {
+            orderList = [order];
+        } else {
+            return res.status(400).json({ error: 'Thiếu mã đơn' });
+        }
+
+        // Lấy tất cả đơn hàng từ DB
+        const orderDocs = await Order.find({ Madon: { $in: orderList } });
+
+        // Nhóm đơn theo nguồn (DomainSmm) và loại (manual/API)
+        const manualOrders = [];
+        const apiOrdersBySource = new Map();
+        const results = [];
+
+        // Phân loại đơn hàng
+        for (const madon of orderList) {
+            const ordersDoc = orderDocs.find(doc => doc.Madon === Number(madon));
+            let result = { order: Number(madon) };
+
+            if (!ordersDoc) {
+                result.refill = { error: 'Incorrect order ID' };
+                results.push(result);
+                continue;
+            }
+
+            if (ordersDoc.refil !== "on") {
+                result.refill = { error: 'Đơn hàng không hỗ trợ bảo hành' };
+                results.push(result);
+                continue;
+            }
+
+            // Kiểm tra quyền bảo hành
+            if (user.role !== 'admin' && ordersDoc.username !== user.username) {
+                result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                results.push(result);
+                continue;
+            }
+
+            // Phân loại đơn tay và đơn API
+            const isManualOrder = ordersDoc.ordertay === true;
+            if (isManualOrder) {
+                manualOrders.push({ doc: ordersDoc, result });
+            } else {
+                const sourceId = ordersDoc.DomainSmm.toString();
+                if (!apiOrdersBySource.has(sourceId)) {
+                    apiOrdersBySource.set(sourceId, []);
+                }
+                apiOrdersBySource.get(sourceId).push({ doc: ordersDoc, result });
+            }
+        }
+
+        // Xử lý đơn tay
+        for (const { doc: ordersDoc, result } of manualOrders) {
+            try {
+                const createdAt = new Date();
+                const historyData = new HistoryUser({
+                    username: ordersDoc.username,
+                    madon: ordersDoc.Madon,
+                    hanhdong: "Bảo hành",
+                    link: ordersDoc.link,
+                    tienhientai: user.balance,
+                    tongtien: 0,
+                    tienconlai: user.balance,
+                    createdAt: new Date(),
+                    mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                });
+                await historyData.save();
+
+                const teleConfig = await Telegram.findOne();
+                if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                    const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+                    const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n\n🆔 
+                    Mã đơn: ${ordersDoc.Madon}\n👤 
+                    Khách hàng: ${ordersDoc.username}\n📱 
+                    Dịch vụ: ${ordersDoc.namesv}\n🔗 
+                    Link/UID: ${ordersDoc.link}\n⏰ 
+                    Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                    await sendTelegramNotification({
+                        telegramBotToken: teleConfig.botToken,
+                        telegramChatId: teleConfig.chatId,
+                        message: telegramMessage,
+                    });
+                }
+                result.refill = 1;
+                results.push(result);
+            } catch (err) {
+                result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                results.push(result);
+            }
+        }
+
+        // Xử lý đơn API - nhóm theo nguồn
+        for (const [sourceId, orderGroup] of apiOrdersBySource) {
+            try {
+                const smmConfig = await SmmSv.findById(sourceId);
+                if (!smmConfig) {
+                    for (const { result } of orderGroup) {
+                        result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                        results.push(result);
+                    }
+                    continue;
+                }
+
+                const smmApi = new SmmApiService(smmConfig.url_api, smmConfig.api_token);
+                const orderIds = orderGroup.map(({ doc }) => doc.orderId);
+
+                // Gọi multiRefill nếu có nhiều đơn
+                let apiResult;
+                if (orderIds.length > 1) {
+                    apiResult = await smmApi.multiRefill(orderIds);
+                } else {
+                    apiResult = await smmApi.refill(orderIds[0]);
+                }
+
+                // Xử lý kết quả
+                if (Array.isArray(apiResult)) {
+                    // Kết quả từ multiRefill
+                    for (let i = 0; i < orderGroup.length; i++) {
+                        const { doc: ordersDoc, result } = orderGroup[i];
+                        const refillResult = apiResult[i];
+
+                        if (refillResult && !refillResult.error) {
+                            const historyData = new HistoryUser({
+                                username: ordersDoc.username,
+                                madon: ordersDoc.Madon,
+                                hanhdong: "Bảo hành",
+                                link: ordersDoc.link,
+                                tienhientai: user.balance,
+                                tongtien: 0,
+                                tienconlai: user.balance,
+                                createdAt: new Date(),
+                                mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                            });
+                            await historyData.save();
+                            result.refill = 1;
+                        } else {
+                            result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                        }
+                        results.push(result);
+                    }
+                } else {
+                    // Kết quả từ refill đơn lẻ
+                    const { doc: ordersDoc, result } = orderGroup[0];
+                    if (apiResult && !apiResult.error) {
+                        const historyData = new HistoryUser({
+                            username: ordersDoc.username,
+                            madon: ordersDoc.Madon,
+                            hanhdong: "Bảo hành",
+                            link: ordersDoc.link,
+                            tienhientai: user.balance,
+                            tongtien: 0,
+                            tienconlai: user.balance,
+                            createdAt: new Date(),
+                            mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                        });
+                        await historyData.save();
+                        result.refill = 1;
+                    } else {
+                        result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                    }
+                    results.push(result);
+                }
+            } catch (err) {
+                for (const { result } of orderGroup) {
+                    result.refill = { error: 'Đơn hàng không thể bảo hành' };
+                    results.push(result);
+                }
+            }
+        }
+
+        return res.json(results);
+    } catch (err) {
+        res.status(500).json({ error: 'đơn hàng không thể bảo hành' });
+    }
+};
+
+exports.getme = async (req, res) => {
+    try {
+        const { key } = req.body;
+
+        // Kiểm tra xem token có được gửi không
+        if (!key) {
+            return res.status(400).json({ error: "Token không được bỏ trống" });
+        }
+        // Lấy user từ DB dựa trên userId từ decoded token
+        const user = await User.findOne({ apiKey: key });
+        if (!user) {
+            res.status(404).json({ error: 'Người dùng không tồn tại' });
+            return null;
+        }
+
+        // So sánh token trong header với token đã lưu của user
+        if (user.apiKey !== key) {
+            res.status(401).json({ error: 'api Key không hợp lệ1' });
+            return null;
+        }
+        // Kiểm tra trạng thái người dùng trong CSDL (ví dụ: 'active')
+        if (!user) {
+            return res.status(404).json({ error: "Không tìm thấy người dùng" });
+        }
+        if (user.status && user.status !== 'active') {
+            return res.status(403).json({ error: "Người dùng không hoạt động" });
+        }
+        // Định dạng các trường cần hiển thị (có thể điều chỉnh theo yêu cầu)
+        const userForm = {
+            balance: user.balance / 25000,
+            currency: "USD",
+            // Các trường khác nếu cần
+        };
+        return res.status(200).json(userForm);
+    } catch (error) {
+        console.error("Lỗi khi lấy thông tin:", error);
+        return res.status(500).json({
+            error: "Lỗi khi lấy thông tin",
+        });
+    }
+};
+/* Hàm điều phối dựa trên giá trị của action trong body */
+exports.routeRequest = async (req, res) => {
+    const { action } = req.body;
+
+    if (action === 'services') {
+        // Gọi hàm lấy danh sách dịch vụ
+        return exports.getServices(req, res);
+    } else if (action === 'add') {
+        // Gọi hàm tạo đơn hàng
+        return exports.AddOrder(req, res);
+    } else if (action === 'webcon') {
+        // Gọi hàm lấy danh sách dịch vụ
+        return exports.getServiceswebcon(req, res);
+    } else if (action === 'status') {
+        // Gọi hàm tạo get trạng thái
+        return exports.getOrderStatus(req, res);
+    } else if (action === 'balance') {
+        // Gọi hàm tạo get trạng thái
+        return exports.getme(req, res);
+    } else if (action === 'cancel') {
+        // Gọi hàm hủy đơn hàng
+        return exports.cancelOrder(req, res);
+    } else if (action === 'refill') {
+        // Gọi hàm bảo hành đơn hàng
+        return exports.refillOrder(req, res);
+    } else {
+        return res.status(400).json({ error: "Action không hợp lệ" });
+    }
+};
