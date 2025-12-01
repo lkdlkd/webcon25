@@ -8,15 +8,59 @@ const axios = require('axios');
 exports.getRefunds = async (req, res) => {
     try {
         const user = req.user;
-        const { status } = req.query;
+        const { status, madon, username, page = 1, limit = 20 } = req.query;
 
-        let filter = {};
         if (!user) {
             return res.status(401).json({ error: 'Không xác thực được người dùng' });
         }
-        filter.status = status;
-        const refunds = await Refund.find(filter).sort({ createdAt: -1 });
-        return res.status(200).json({ success: true, data: refunds });
+
+        let filter = {};
+
+        // Lọc theo status nếu có
+        if (status !== undefined && status !== '') {
+            filter.status = status === 'true' || status === true;
+        }
+
+        // Tìm theo mã đơn nếu có
+        if (madon) {
+            const madonNum = Number(madon);
+            if (!isNaN(madonNum)) {
+                filter.madon = madonNum;
+            } else {
+                filter.madon = madon;
+            }
+        }
+
+        // Lọc theo username nếu có
+        if (username) {
+            filter.username = { $regex: username, $options: 'i' };
+        }
+
+        // Phân trang
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+        const skip = (pageNum - 1) * limitNum;
+
+        // Đếm tổng số và lấy dữ liệu
+        const [total, refunds] = await Promise.all([
+            Refund.countDocuments(filter),
+            Refund.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum)
+        ]);
+
+        const totalPages = Math.ceil(total / limitNum);
+
+        return res.status(200).json({
+            success: true,
+            data: refunds,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages,
+                hasNext: pageNum < totalPages,
+                hasPrev: pageNum > 1
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
     }
