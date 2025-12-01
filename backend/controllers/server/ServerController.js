@@ -101,17 +101,37 @@ exports.getServer = async (req, res) => {
     }
     if (user.role === "admin") {
       const search = req.query.search ? req.query.search.trim() : "";
+      const { DomainSmm, category, isActive, status } = req.query;
       let filter = {};
 
-      // Tạo bộ lọc tìm kiếm
+      // Tạo bộ lọc tìm kiếm theo Magoi hoặc serviceId
       if (search) {
-        filter = {
-          $or: [
-            { Magoi: { $regex: search, $options: "i" } },
-            { serviceId: { $regex: search, $options: "i" } },
-          ],
-        };
+        filter.$or = [
+          { Magoi: { $regex: search, $options: "i" } },
+          { serviceId: { $regex: search, $options: "i" } },
+        ];
       }
+
+      // Lọc theo nguồn (DomainSmm)
+      if (DomainSmm) {
+        filter.DomainSmm = DomainSmm;
+      }
+
+      // Lọc theo category
+      if (category) {
+        filter.category = category;
+      }
+
+      // Lọc theo isActive
+      if (isActive !== undefined && isActive !== '') {
+        filter.isActive = isActive === 'true' || isActive === true;
+      }
+
+      // Lọc theo status
+      if (status !== undefined && status !== '') {
+        filter.status = status === 'true' || status === true;
+      }
+
       // Admin: có thể xem tất cả dịch vụ với phân trang
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 1000000;
