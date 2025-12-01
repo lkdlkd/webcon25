@@ -425,7 +425,7 @@ exports.addBalance = async (req, res) => {
 
     // Sử dụng cấu hình Telegram trong DB
     const teleConfig = await Telegram.findOne();
-    if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+    if (teleConfig && teleConfig.botToken && teleConfig.chatidnaptien) {
       // Giờ Việt Nam (UTC+7)
       const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
       const telegramMessage =
@@ -442,7 +442,7 @@ exports.addBalance = async (req, res) => {
         })}\n`;
       try {
         await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
-          chat_id: teleConfig.chatId,
+          chat_id: teleConfig.chatidnaptien,
           text: telegramMessage,
           parse_mode: "Markdown",
         });
@@ -451,6 +451,35 @@ exports.addBalance = async (req, res) => {
         console.error("Lỗi gửi thông báo Telegram:", telegramError.message);
       }
     }
+
+    // Gửi thông báo cho user nếu đã liên kết Telegram
+    if (teleConfig && teleConfig.bot_notify && updatedUser.telegramChatId) {
+      const taolucUser = new Date(Date.now() + 7 * 60 * 60 * 1000);
+      const userMessage =
+        `🎉 *Thông báo cộng tiền!*\n` +
+        `💰 *Số tiền:* ${Number(amount).toLocaleString("en-US")} VNĐ\n` +
+        `💵 *Số dư hiện tại:* ${Number(Math.floor(currentBalance)).toLocaleString("en-US")} VNĐ\n` +
+        `🔹 *Thời gian:* ${taolucUser.toLocaleString("vi-VN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })}\n` +
+        `📝 *Nội dung:* Admin cộng tiền`;
+      try {
+        await axios.post(`https://api.telegram.org/bot${teleConfig.bot_notify}/sendMessage`, {
+          chat_id: updatedUser.telegramChatId,
+          text: userMessage,
+          parse_mode: "Markdown",
+        });
+        console.log("Thông báo Telegram cho user đã được gửi.");
+      } catch (telegramError) {
+        console.error("Lỗi gửi thông báo Telegram cho user:", telegramError.message);
+      }
+    }
+
     res.status(200).json({ message: "Cộng tiền thành công" });
   } catch (error) {
     console.error("Add balance error:", error);
@@ -509,7 +538,7 @@ exports.deductBalance = async (req, res) => {
     // Gửi thông báo qua Telegram (nếu cấu hình có đủ)
     const taoluc = new Date();
     const teleConfig = await Telegram.findOne();
-    if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+    if (teleConfig && teleConfig.botToken && teleConfig.chatidnaptien) {
       // Giờ Việt Nam (UTC+7)
       const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
       const telegramMessage =
@@ -526,7 +555,7 @@ exports.deductBalance = async (req, res) => {
         })}\n`;
       try {
         await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
-          chat_id: teleConfig.chatId,
+          chat_id: teleConfig.chatidnaptien,
           text: telegramMessage,
           parse_mode: "Markdown",
         });

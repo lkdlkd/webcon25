@@ -41,18 +41,18 @@ exports.refillOrder = async (req, res) => {
             await historyData.save();
 
             const teleConfig = await Telegram.findOne();
-            if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+            if (teleConfig && teleConfig.botToken && teleConfig.chatiddontay) {
                 // Giờ Việt Nam (UTC+7)
                 const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
-                const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n\n🆔 
-                Mã đơn: ${order.Madon}\n👤 
-                Khách hàng: ${order.username}\n📱 
-                Dịch vụ: ${order.namesv}\n🔗 
-                Link/UID: ${order.link}\n⏰ 
-                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n` +
+                    `🆔Mã đơn: ${order.Madon}\n` +
+                    `👤Khách hàng: ${order.username}\n ` +
+                    `📱Dịch vụ: ${order.namesv}\n` +
+                    `🔗Link / UID: ${order.link} \n` +
+                    `⏰Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })};`
                 await sendTelegramNotification({
                     telegramBotToken: teleConfig.botToken,
-                    telegramChatId: teleConfig.chatId,
+                    telegramChatId: teleConfig.chatiddontay,
                     message: telegramMessage,
                 });
             }
@@ -109,6 +109,7 @@ async function sendTelegramNotification(data) {
             await axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
                 chat_id: telegramChatId,
                 text: message,
+                parse_mode: 'Markdown',
             });
             console.log('Thông báo Telegram đã được gửi.');
         } catch (error) {
@@ -161,18 +162,18 @@ exports.cancelOrder = async (req, res) => {
             order.iscancel = true;
             await order.save();
             const teleConfig = await Telegram.findOne();
-            if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+            if (teleConfig && teleConfig.botToken && teleConfig.chatiddontay) {
                 // Giờ Việt Nam (UTC+7)
                 const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
-                const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n\n🆔 
-                Mã đơn: ${order.Madon}\n👤 
-                Khách hàng: ${order.username}\n📱 
-                Dịch vụ: ${order.namesv}\n🔗 
-                Link/UID: ${order.link}\n⏰ 
-                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n` +
+                    `🆔 Mã đơn: ${order.Madon}\n` +
+                    `👤 Khách hàng: ${order.username}\n` +
+                    `📱Dịch vụ: ${order.namesv}\n` +
+                    `🔗Link/UID: ${order.link}\n` +
+                    `⏰Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
                 await sendTelegramNotification({
                     telegramBotToken: teleConfig.botToken,
-                    telegramChatId: teleConfig.chatId,
+                    telegramChatId: teleConfig.chatiddontay,
                     message: telegramMessage,
                 });
             }

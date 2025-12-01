@@ -231,7 +231,7 @@ cron.schedule('*/30 * * * * *', async () => {
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
                         const teleConfig = await Telegram.findOne();
                         if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
-                            const adminChatId = teleConfig.chatId;
+                            const adminChatId = teleConfig.chatidnaptien;
                             const adminbottoken = teleConfig.botToken;
                             const userbotToken = teleConfig.bot_notify;
                             const telegramMessage =

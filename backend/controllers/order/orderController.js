@@ -384,9 +384,12 @@ async function addOrder(req, res) {
         })}\n` +
         `📝 *Ghi chú:* ${note || 'Không có'}\n` +
         `Nguồn: ${serviceFromDb.DomainSmm.name}`;
+      
+      // Nếu là đơn tay, gửi đến chatiddontay
+      const targetChatId = isManualOrder && teleConfig.chatiddontay ? teleConfig.chatiddontay : teleConfig.chatId;
       await sendTelegramNotification({
         telegramBotToken: teleConfig.botToken,
-        telegramChatId: teleConfig.chatId,
+        telegramChatId: targetChatId,
         message: telegramMessage,
       });
     }

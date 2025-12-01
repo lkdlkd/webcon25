@@ -15,6 +15,7 @@ exports.getConfigCard = async (req, res) => {
         API_URLCARD: "",
         PARTNER_ID: "",
         PARTNER_KEY: "",
+        RATE: 5,
       };
     }
 
@@ -32,7 +33,7 @@ exports.updateConfigCard = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { API_URLCARD, PARTNER_ID, PARTNER_KEY } = req.body;
+    const { API_URLCARD, PARTNER_ID, PARTNER_KEY, RATE } = req.body;
 
     let config = await ConfigCard.findOne();
 
@@ -42,12 +43,14 @@ exports.updateConfigCard = async (req, res) => {
         API_URLCARD: API_URLCARD || "",
         PARTNER_ID: PARTNER_ID || "",
         PARTNER_KEY: PARTNER_KEY || "",
+        RATE: RATE || 5,
       });
     } else {
       // Cập nhật cấu hình hiện tại
       config.API_URLCARD = API_URLCARD || config.API_URLCARD;
       config.PARTNER_ID = PARTNER_ID || config.PARTNER_ID;
       config.PARTNER_KEY = PARTNER_KEY || config.PARTNER_KEY;
+      config.RATE = RATE || config.RATE;
     }
 
     await config.save();

@@ -110,7 +110,7 @@ async function fetchPanelBalance(panel) {
 async function checkSmmBalancesAndNotify() {
   try {
     const teleConfig = await Telegram.findOne();
-    if (!teleConfig || !teleConfig.botToken || !teleConfig.chatId) return;
+    if (!teleConfig || !teleConfig.botToken || !teleConfig.chatidsdnguon) return;
     const panels = await SmmSv.find({ status: 'on' });
     if (!panels.length) return;
     const lowPanels = [];
@@ -142,7 +142,7 @@ async function checkSmmBalancesAndNotify() {
       const msg = `⚠️ *Cảnh báo số dư ĐỐI TÁC thấp*\n${lines}\n⏰ ${taoluc}`;
       try {
         await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
-          chat_id: teleConfig.chatId,
+          chat_id: teleConfig.chatidsdnguon,
           text: msg.replace(/_/g, '\\_'),
           parse_mode: 'Markdown'
         });

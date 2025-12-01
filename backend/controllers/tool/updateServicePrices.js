@@ -22,7 +22,7 @@ function calculateNewPrices(apiRate, priceUpdateMember, priceUpdateVip, priceUpd
 // Helper: Gửi thông báo Telegram
 async function sendPriceUpdateNotification(serviceItem, oldRate, newPrices, previousOriginal, apiRate, sourceName, direction) {
   const teleConfig = await Telegram.findOne();
-  if (!teleConfig?.botToken || !teleConfig?.chatId) return;
+  if (!teleConfig?.botToken || !teleConfig?.chatidthaydoigoi) return;
 
   const createdAtVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
   const telegramMessage =
@@ -47,7 +47,7 @@ async function sendPriceUpdateNotification(serviceItem, oldRate, newPrices, prev
 
   try {
     await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
-      chat_id: teleConfig.chatId,
+      chat_id: teleConfig.chatidthaydoigoi,
       text: telegramMessage,
       parse_mode: 'Markdown'
     });

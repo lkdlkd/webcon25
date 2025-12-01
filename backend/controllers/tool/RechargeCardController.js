@@ -81,10 +81,10 @@ exports.rechargeCardStatus = async () => {
                             continue;
                         }
 
-                        // Lấy phí cao nhất từ bảng Card
-                        const cardInfo = await cardModel.findOne({ telco: card.type }).sort({ fees: -1 });
+                        // Lấy phí của thẻ theo telco và mệnh giá
+                        const cardInfo = await cardModel.findOne({ telco: card.type, value: card.amount });
                         if (!cardInfo) {
-                            console.error(`Không tìm thấy thông tin phí cho nhà mạng: ${card.type}`);
+                            console.error(`Không tìm thấy thông tin phí cho nhà mạng: ${card.type}, mệnh giá: ${card.amount}`);
                             continue;
                         }
 
@@ -134,7 +134,7 @@ exports.rechargeCardStatus = async () => {
                         const teleConfig = await Telegram.findOne();
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
                         if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
-                            const adminChatId = teleConfig.chatId;
+                            const adminChatId = teleConfig.chatidnaptien;
                             const adminbottoken = teleConfig.botToken;
                             const userbotToken = teleConfig.bot_notify;
                             const telegramMessage =
@@ -187,8 +187,8 @@ exports.rechargeCardStatus = async () => {
                             continue;
                         }
 
-                        // Lấy phí cao nhất từ bảng Card
-                        const cardInfo = await cardModel.findOne({ telco: card.type }).sort({ fees: -1 });
+                        // Lấy phí của thẻ theo telco và mệnh giá thực tế từ API
+                        const cardInfo = await cardModel.findOne({ telco: card.type, value: statusCard.data.value });
                         const percent_card = cardInfo ? Number(cardInfo.fees) : 0;
 
                         // Tính chiết khấu cho trường hợp sai mệnh giá
@@ -236,7 +236,7 @@ exports.rechargeCardStatus = async () => {
                         const teleConfig = await Telegram.findOne();
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
                         if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
-                            const adminChatId = teleConfig.chatId;
+                            const adminChatId = teleConfig.chatidnaptien;
                             const adminbottoken = teleConfig.botToken;
                             const userbotToken = teleConfig.bot_notify;
                             const telegramMessage =

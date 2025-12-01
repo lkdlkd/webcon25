@@ -65,8 +65,8 @@ exports.createTransaction = async (req, res) => {
       },
     });
 
-    // Lấy phí cao nhất từ bảng Card
-    const cardInfo = await Card.findOne({ telco: card_type }).sort({ fees: -1 });
+    // Lấy phí của thẻ theo telco và mệnh giá
+    const cardInfo = await Card.findOne({ telco: card_type, value: card_value });
     const percent_card = cardInfo ? Number(cardInfo.fees) : 0;
     const chietkhau = card_value - (card_value * percent_card) / 100;
 
@@ -80,7 +80,7 @@ exports.createTransaction = async (req, res) => {
     if (response.data.status === 102) {
       return res.status(500).json({ error: "Nạp thẻ thất bại, vui lòng thử lại sau" });
     }
-        if (response.data.status === 100) {
+    if (response.data.status === 100) {
       return res.status(500).json({ error: "Nạp thẻ thất bại, vui lòng thử lại sau" });
     }
 

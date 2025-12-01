@@ -140,7 +140,7 @@ exports.adminApproveRefund = async (req, res) => {
                 await historyData.save();
 
                 // Gửi thông báo Telegram theo định dạng cũ (mỗi đơn 1 tin nhắn)
-                if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                if (teleConfig && teleConfig.botToken && teleConfig.chatidnaptien) {
                     const soTienHoanFormatted = Number(Math.round(soTienHoan)).toLocaleString('en-US');
                     const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
                     const telegramMessage =
@@ -160,7 +160,7 @@ exports.adminApproveRefund = async (req, res) => {
                         })}\n`;
                     try {
                         await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
-                            chat_id: teleConfig.chatId,
+                            chat_id: teleConfig.chatidnaptien,
                             text: telegramMessage,
                             parse_mode: 'Markdown',
                         });

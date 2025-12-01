@@ -12,8 +12,12 @@ exports.getTelegramConfig = async (req, res) => {
         if (!config) {
             config = {
                 botToken: "",
-                chatId: "",
-                bot_notify : "",
+                chatId: "", // chat ID đơn hàng chính
+                chatiddontay: "", // chat ID đơn tay
+                chatidnaptien: "", // chat ID nạp tiền
+                chatidthaydoigoi: "", // chat ID thay đổi gói
+                chatidsdnguon: "", // chat ID số dư ngưồn
+                bot_notify : "", // bot người dùng
             };
         }
         res.status(200).json({ success: true, data: config });
@@ -29,15 +33,19 @@ exports.updateTelegramConfig = async (req, res) => {
         if (!user || user.role !== 'admin') {
             return res.status(403).json({ message: 'Chỉ admin mới có quyền cập nhật' });
         }
-        const { botToken, chatId , bot_notify } = req.body;
+        const { botToken, chatId ,chatiddontay, bot_notify , chatidnaptien, chatidthaydoigoi, chatidsdnguon } = req.body;
         let config = await Telegram.findOne();
         if (config) {
             config.botToken = botToken;
-            config.chatId = chatId;
+            config.chatId = chatId; 
+            config.chatiddontay = chatiddontay;
+            config.chatidnaptien = req.body.chatidnaptien;
+            config.chatidthaydoigoi = req.body.chatidthaydoigoi;
+            config.chatidsdnguon = req.body.chatidsdnguon;
             config.bot_notify = bot_notify;
             await config.save();
         } else {
-            config = await Telegram.create({ botToken, chatId, bot_notify });
+            config = await Telegram.create({ botToken, chatId, chatiddontay, bot_notify, chatidnaptien, chatidthaydoigoi, chatidsdnguon });
         }
         res.json({ message: 'Cập nhật cấu hình Telegram thành công', config });
     } catch (error) {

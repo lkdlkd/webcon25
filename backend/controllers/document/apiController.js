@@ -429,9 +429,12 @@ exports.AddOrder = async (req, res) => {
                 })}\n` +
                 `📝 *Ghi chú:* ${'api/v2'}\n` +
                 `Nguồn: ${serviceFromDb.DomainSmm.name}`;
+
+            // Nếu là đơn tay, gửi đến chatiddontay
+            const targetChatId = isManualOrder && teleConfig.chatiddontay ? teleConfig.chatiddontay : teleConfig.chatId;
             await sendTelegramNotification({
                 telegramBotToken: teleConfig.botToken,
-                telegramChatId: teleConfig.chatId,
+                telegramChatId: targetChatId,
                 message: telegramMessage,
             });
         }
@@ -645,18 +648,19 @@ exports.cancelOrder = async (req, res) => {
                     ordersDoc.iscancel = true;
                     await ordersDoc.save();
                     const teleConfig = await Telegram.findOne();
-                    if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                    if (teleConfig && teleConfig.botToken && teleConfig.chatiddontay) {
                         // Giờ Việt Nam (UTC+7)
                         const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
-                        const telegramMessage = `⚠️ Đơn hàng cần hủy (Đơn tay)\n\n🆔 
-                                Mã đơn: ${order.Madon}\n👤 
-                                Khách hàng: ${ordersDoc.username}\n📱 
-                                Dịch vụ: ${ordersDoc.namesv}\n🔗 
-                                Link/UID: ${ordersDoc.link}\n⏰ 
-                                Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                        const telegramMessage =
+                            `⚠️ Đơn hàng cần hủy (Đơn tay)\n` +
+                            `🆔Mã đơn: ${ordersDoc.Madon}\n` +
+                            `👤Khách hàng: ${ordersDoc.username}\n` +
+                            `📱Dịch vụ: ${ordersDoc.namesv}\n` +
+                            `🔗Link/UID: ${ordersDoc.link}\n` +
+                            `⏰Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
                         await sendTelegramNotification({
                             telegramBotToken: teleConfig.botToken,
-                            telegramChatId: teleConfig.chatId,
+                            telegramChatId: teleConfig.chatiddontay,
                             message: telegramMessage,
                         });
                     }
@@ -810,17 +814,18 @@ exports.refillOrder = async (req, res) => {
                 await historyData.save();
 
                 const teleConfig = await Telegram.findOne();
-                if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
+                if (teleConfig && teleConfig.botToken && teleConfig.chatiddontay) {
                     const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
-                    const telegramMessage = `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n\n🆔 
-                    Mã đơn: ${ordersDoc.Madon}\n👤 
-                    Khách hàng: ${ordersDoc.username}\n📱 
-                    Dịch vụ: ${ordersDoc.namesv}\n🔗 
-                    Link/UID: ${ordersDoc.link}\n⏰ 
-                    Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+                    const telegramMessage =
+                        `⚠️ Đơn hàng cần bảo hành (Đơn tay)\n` +
+                        `🆔Mã đơn: ${ordersDoc.Madon}\n` +
+                        `👤Khách hàng: ${ordersDoc.username}\n` +
+                        `📱Dịch vụ: ${ordersDoc.namesv}\n` +
+                        `🔗Link/UID: ${ordersDoc.link}\n` +
+                        `⏰Thời gian tạo: ${createdAtVN.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
                     await sendTelegramNotification({
                         telegramBotToken: teleConfig.botToken,
-                        telegramChatId: teleConfig.chatId,
+                        telegramChatId: teleConfig.chatiddontay,
                         message: telegramMessage,
                     });
                 }
@@ -872,7 +877,7 @@ exports.refillOrder = async (req, res) => {
                                 tongtien: 0,
                                 tienconlai: user.balance,
                                 createdAt: new Date(),
-                                mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                                mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link} `,
                             });
                             await historyData.save();
                             result.refill = 1;
@@ -894,7 +899,7 @@ exports.refillOrder = async (req, res) => {
                             tongtien: 0,
                             tienconlai: user.balance,
                             createdAt: new Date(),
-                            mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link}`,
+                            mota: `Bảo hành dịch vụ ${ordersDoc.namesv} thành công cho uid ${ordersDoc.link} `,
                         });
                         await historyData.save();
                         result.refill = 1;

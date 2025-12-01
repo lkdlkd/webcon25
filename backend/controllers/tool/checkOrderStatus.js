@@ -50,7 +50,7 @@ async function processTelegramQueue() {
 }
 
 function queueTelegramNotification(teleConfig, order, soTienHoan, quantity, isApproved, phihoan) {
-  if (!teleConfig?.botToken || !teleConfig?.chatId) return;
+  if (!teleConfig?.botToken || !teleConfig?.chatidnaptien) return;
 
   const title = isApproved ? 'THÔNG BÁO HOÀN TIỀN!' : 'THÔNG BÁO HOÀN TIỀN CHƯA DUYỆT!';
   const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -65,7 +65,7 @@ function queueTelegramNotification(teleConfig, order, soTienHoan, quantity, isAp
 
   telegramQueue.push({
     botToken: teleConfig.botToken,
-    chatId: teleConfig.chatId,
+    chatId: teleConfig.chatidnaptien,
     text
   });
 
