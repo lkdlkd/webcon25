@@ -18,9 +18,11 @@ const configwebController = require("../controllers/website/ConfigwebController"
 const configCardController = require("../controllers/website/configCardController");
 const { createPromotion, updatePromotion, deletePromotion, getPromotions } = require('../controllers/Khuyenmai/KhuyenmaiController');
 // const Home = require("../controllers/website/Home");
+const rateLimit = require('express-rate-limit');
 
 const SmmController = require('../controllers/Smm/Smm');
 const refillCancelController = require('../controllers/order/RefilandCancelController');
+const captchaController = require('@/controllers/captcha/captchaController'); // CAPTCHA controller
 
 const refund = require('@/controllers/order/refundController');
 // router.get('/home', authenticate.authenticateUser, Home.getHomeOverview);
@@ -30,8 +32,19 @@ router.delete('/refund', authenticate.authenticateAdmin, refund.adminDeleteRefun
 router.post('/refill', authenticate.authenticateUser, refillCancelController.refillOrder); // ok Thực hiện refill đơn hàng
 router.post('/cancel', authenticate.authenticateUser, refillCancelController.cancelOrder); // ok Thực hiện hủy đơn hàng
 //auth
+// Cấu hình rate-limit
+const recaptchaLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 phút
+  max: 20,              // tối đa 20 request / IP / 1 phút
+  message: { 
+    error: "Bạn gửi quá nhiều request, vui lòng thử lại sau." 
+  }
+});
+
+// Route lấy site key với rate-limit
+router.get('/recaptcha-site-key', recaptchaLimiter, captchaController.getSiteKey);
 router.post('/login', user.login);//ok
-router.post('/register', user.register);//ok
+router.post('/register',recaptchaLimiter, user.register);//ok
 // 2FA routes
 router.post('/2fa/setup', authenticate.authenticateUser, user.setup2FA); // Tạo secret tạm & QR
 router.post('/2fa/verify', authenticate.authenticateUser, user.verify2FA); // Xác minh & bật 2FA

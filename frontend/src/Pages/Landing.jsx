@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState, useContext, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { login, register } from '@/Utils/api';
+import { login, register, getRecaptchaSiteKey } from '@/Utils/api';
 import { AuthContext } from '@/Context/AuthContext';
 import Table from "react-bootstrap/Table";
+import ReCAPTCHA from "react-google-recaptcha";
 export default function Landing() {
     // Modal states
-    const [showAuthModal, setShowAuthModal] = useState(false);
+    // const [showAuthModal, setShowAuthModal] = useState(false);
     const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
     const API_DOMAIN = window.location.origin; // Lấy tên miền hiện tại và thêm đường dẫn API
     const Domain = API_DOMAIN.replace(/^https?:\/\//, ""); // Bỏ https:// hoặc http://
@@ -27,6 +28,10 @@ export default function Landing() {
     const [success, setSuccess] = useState('');
     const [otpStep, setOtpStep] = useState(false);
     const [otp, setOtp] = useState('');
+    const [recaptchaToken, setRecaptchaToken] = useState('');
+    const [siteKey, setSiteKey] = useState('');
+    const [siteKeyLoading, setSiteKeyLoading] = useState(true);
+    const recaptchaRef = useRef(null);
 
     const navigate = useNavigate();
     const { updateAuth } = useContext(AuthContext);
@@ -46,19 +51,23 @@ export default function Landing() {
         setSuccess('');
         setOtpStep(false);
         setOtp('');
+        setRecaptchaToken('');
+        if (recaptchaRef.current) {
+            recaptchaRef.current.reset();
+        }
     };
 
-    // Handle auth modal open/close
-    const openAuthModal = (mode) => {
-        setAuthMode(mode);
-        setShowAuthModal(true);
-        resetForm();
-    };
+    // // Handle auth modal open/close
+    // const openAuthModal = (mode) => {
+    //     setAuthMode(mode);
+    //     setShowAuthModal(true);
+    //     resetForm();
+    // };
 
-    const closeAuthModal = () => {
-        setShowAuthModal(false);
-        resetForm();
-    };
+    // const closeAuthModal = () => {
+    //     setShowAuthModal(false);
+    //     resetForm();
+    // };
 
     // Handle login
     const handleLogin = async (e) => {
@@ -87,7 +96,6 @@ export default function Landing() {
                 updateAuth({ token: data.token, role: data.role });
                 setSuccess('Đăng nhập thành công!');
                 setTimeout(() => {
-                    closeAuthModal();
                     navigate('/home');
                 }, 1000);
             }
@@ -111,6 +119,13 @@ export default function Landing() {
             return;
         }
 
+        // Kiểm tra reCAPTCHA
+        if (!recaptchaToken) {
+            setError('Vui lòng xác nhận bạn không phải là người máy.');
+            setLoading(false);
+            return;
+        }
+
         // if (formData.password !== formData.confirmPassword) {
         //     setError('Mật khẩu xác nhận không khớp.');
         //     setLoading(false);
@@ -120,7 +135,8 @@ export default function Landing() {
         try {
             const data = await register({
                 username: formData.username,
-                password: formData.password
+                password: formData.password,
+                recaptchaToken: recaptchaToken
             });
             setSuccess(data.message || 'Đăng ký thành công!');
             setTimeout(() => {
@@ -129,6 +145,11 @@ export default function Landing() {
             }, 1500);
         } catch (err) {
             setError(err.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+            // Reset reCAPTCHA khi có lỗi
+            setRecaptchaToken('');
+            if (recaptchaRef.current) {
+                recaptchaRef.current.reset();
+            }
         } finally {
             setLoading(false);
         }
@@ -141,9 +162,25 @@ export default function Landing() {
             setCopySuccess(label);
             setTimeout(() => setCopySuccess(''), 2000);
         } catch (err) {
-            console.error('Failed to copy: ', err);
+            // console.error('Failed to copy: ', err);
         }
     };
+
+    // Lấy reCAPTCHA site key
+    useEffect(() => {
+        const fetchSiteKey = async () => {
+            try {
+                setSiteKeyLoading(true);
+                const data = await getRecaptchaSiteKey();
+                setSiteKey(data.siteKey);
+            } catch (err) {
+
+            } finally {
+                setSiteKeyLoading(false);
+            }
+        };
+        fetchSiteKey();
+    }, []);
 
     useEffect(() => {
         // Add custom CSS animations
@@ -1441,7 +1478,7 @@ export default function Landing() {
 
                             <button
                                 className="nav-btn nav-btn-outline"
-                                onClick={() => openAuthModal('login')}
+                                onClick={() => navigate('/dang-nhap')}
                             >
                                 <i className="fas fa-sign-in-alt"></i>
                                 Đăng nhập
@@ -1449,7 +1486,7 @@ export default function Landing() {
 
                             <button
                                 className="nav-btn nav-btn-primary"
-                                onClick={() => openAuthModal('register')}
+                                onClick={() => navigate('/dang-ky')}
                             >
                                 <i className="fas fa-user-plus"></i>
                                 Đăng ký
@@ -1487,7 +1524,7 @@ export default function Landing() {
                                     </p>
                                     <div className="d-flex gap-2 gap-md-3 flex-wrap mb-4">
                                         <button
-                                            onClick={() => openAuthModal('register')}
+                                            onClick={() => navigate('/dang-ky')}
                                             className="btn btn-warning btn-lg px-4 px-md-5 py-3 rounded-pill fw-bold text-dark shadow-lg"
                                             style={{
                                                 background: 'linear-gradient(135deg, #ffd700 0%, #ffed4a 100%)',
@@ -1794,6 +1831,28 @@ export default function Landing() {
                                                         required
                                                     />
                                                 </div> */}
+                                                        <div className="mb-3">
+                                                            {siteKeyLoading ? (
+                                                                <div className="d-flex justify-content-center">
+                                                                    <div className="d-flex flex-column align-items-center py-3">
+                                                                        <div className="spinner-border spinner-border-sm text-primary mb-2" role="status">
+                                                                            <span className="visually-hidden">Loading...</span>
+                                                                        </div>
+                                                                        <small className="text-muted">Đang tải reCAPTCHA...</small>
+                                                                    </div>
+                                                                </div>
+                                                            ) : siteKey ? (
+                                                                <div className="d-flex justify-content-center">
+                                                                    <ReCAPTCHA
+                                                                        ref={recaptchaRef}
+                                                                        sitekey={siteKey}
+                                                                        onChange={(token) => setRecaptchaToken(token || '')}
+                                                                        onExpired={() => setRecaptchaToken('')}
+                                                                        hl="vi"
+                                                                    />
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
                                                         <button
                                                             type="submit"
                                                             className="btn auth-btn-primary w-100 text-white mb-3"
@@ -2292,14 +2351,14 @@ export default function Landing() {
                                     </p>
                                     <div className="d-flex gap-3 justify-content-center flex-wrap mb-4">
                                         <button
-                                            onClick={() => openAuthModal('register')}
+                                            onClick={() => navigate('/dang-ky')}
                                             className="btn btn-light btn-lg px-5 py-3 rounded-pill shadow-lg hover-lift"
                                         >
                                             <i className="fas fa-user-plus me-2"></i>
                                             Đăng Ký Miễn Phí
                                         </button>
                                         <button
-                                            onClick={() => openAuthModal('login')}
+                                            onClick={() => navigate('/dang-nhap')}
                                             className="btn btn-outline-light btn-lg px-5 py-3 rounded-pill glass-effect hover-lift"
                                         >
                                             <i className="fas fa-sign-in-alt me-2"></i>
@@ -2476,7 +2535,7 @@ export default function Landing() {
                                                             <tr>
                                                                 <td className="fw-semibold text-muted">API Key</td>
                                                                 <td className="fw-bold">
-                                                                    <button type="button" className="btn btn-primary btn-sm rounded-pill px-4" onClick={() => openAuthModal('login')}>
+                                                                    <button type="button" className="btn btn-primary btn-sm rounded-pill px-4" onClick={() => navigate('/dang-nhap')}>
                                                                         <i className="fas fa-key me-2"></i>
                                                                         Lấy tại đây
                                                                     </button>
@@ -2995,7 +3054,7 @@ export default function Landing() {
                                                     <button
                                                         type="button"
                                                         className="btn btn-outline-primary btn-lg rounded-pill px-4"
-                                                        onClick={() => openAuthModal('register')}
+                                                        onClick={() => navigate('/dang-ky')}
                                                         style={{
                                                             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                                             position: 'relative',
@@ -3125,276 +3184,7 @@ export default function Landing() {
             </div> {/* End Main Content */}
 
             {/* Auth Modal */}
-            {showAuthModal && (
-                <div className="modal d-block auth-modal" style={{ zIndex: 1055 }}>
-                    <div className="modal-dialog modal-dialog-centered">
-                        <div className="modal-content auth-modal-content fade-modal">
-                            <div className="modal-header border-0 p-4">
-                                <div className="w-100">
-                                    <div className="d-flex justify-content-center mb-3">
-                                        <div className="btn-group" role="group">
-                                            <button
-                                                type="button"
-                                                className={`auth-tab ${authMode === 'login' ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    setAuthMode('login');
-                                                    resetForm();
-                                                }}
-                                            >
-                                                Đăng nhập
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={`auth-tab ${authMode === 'register' ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    setAuthMode('register');
-                                                    resetForm();
-                                                }}
-                                            >
-                                                Đăng ký
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <button
-                                    type="button"
-                                    className="btn-close"
-                                    onClick={closeAuthModal}
-                                ></button>
-                            </div>
-
-                            <div className="card-body p-4">
-                                {(error || success) && (
-                                    <div
-                                        className={`alert ${error ? 'alert-danger' : 'alert-success'} alert-dismissible fade show position-relative`}
-                                        style={{ paddingRight: '3rem' }}
-                                    >
-                                        {error || success}
-                                        <button
-                                            type="button"
-                                            className="btn-close position-absolute"
-                                            style={{
-                                                top: '50%',
-                                                right: '0px',
-                                                transform: 'translateY(-50%)',
-                                                zIndex: 1,
-                                                width: '1rem',
-                                                height: '1rem'
-                                            }}
-                                            onClick={() => {
-                                                setError('');
-                                                setSuccess('');
-                                            }}
-                                        ></button>
-                                    </div>
-                                )}
-
-                                {authMode === 'login' && (
-                                    <>
-                                        {!otpStep ? (
-                                            <form onSubmit={handleLogin}>
-                                                <div className="mb-3">
-                                                    <label className="form-label fw-semibold">
-                                                        Tên tài khoản <span className="text-danger">*</span>
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        name="username"
-                                                        className="form-control auth-form-control"
-                                                        value={formData.username}
-                                                        onChange={handleInputChange}
-                                                        placeholder="Nhập tên tài khoản"
-                                                        required
-                                                        autoComplete="username"
-                                                    />
-                                                </div>
-                                                <div className="mb-4">
-                                                    <label className="form-label fw-semibold">
-                                                        Mật khẩu <span className="text-danger">*</span>
-                                                    </label>
-                                                    <input
-                                                        type="password"
-                                                        name="password"
-                                                        className="form-control auth-form-control"
-                                                        value={formData.password}
-                                                        onChange={handleInputChange}
-                                                        placeholder="Nhập mật khẩu"
-                                                        required
-                                                        autoComplete="current-password"
-                                                    />
-                                                </div>
-                                                <button
-                                                    type="submit"
-                                                    className="btn auth-btn-primary w-100 text-white"
-                                                    disabled={loading}
-                                                >
-                                                    {loading ? (
-                                                        <>
-                                                            <span className="spinner-border spinner-border-sm me-2"></span>
-                                                            Đang xử lý...
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <i className="fas fa-sign-in-alt me-2"></i>
-                                                            Đăng nhập
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </form>
-                                        ) : (
-                                            <form onSubmit={handleLogin}>
-                                                <div className="text-center mb-4">
-                                                    <i className="fas fa-shield-alt fa-3x text-primary mb-3"></i>
-                                                    <h5>Xác thực 2FA</h5>
-                                                    <p className="text-muted">Nhập mã 6 số từ ứng dụng xác thực của bạn</p>
-                                                </div>
-                                                <div className="mb-4">
-                                                    <input
-                                                        type="text"
-                                                        className="form-control auth-form-control text-center fs-4"
-                                                        value={otp}
-                                                        onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))}
-                                                        placeholder="000000"
-                                                        maxLength={6}
-                                                        required
-                                                        autoFocus
-                                                    />
-                                                    <small className="text-muted">Mã đổi mỗi 30 giây</small>
-                                                </div>
-                                                <div className="d-flex gap-2">
-                                                    <button
-                                                        type="button"
-                                                        className="btn btn-outline-secondary"
-                                                        onClick={() => {
-                                                            setOtpStep(false);
-                                                            setOtp('');
-                                                            setError('');
-                                                            setSuccess('');
-                                                        }}
-                                                        disabled={loading}
-                                                    >
-                                                        Quay lại
-                                                    </button>
-                                                    <button
-                                                        type="submit"
-                                                        className="btn auth-btn-primary flex-grow-1 text-white"
-                                                        disabled={loading || otp.length !== 6}
-                                                    >
-                                                        {loading ? 'Đang xác thực...' : 'Xác thực & đăng nhập'}
-                                                    </button>
-                                                </div>
-                                            </form>
-                                        )}
-                                    </>
-                                )}
-
-                                {authMode === 'register' && (
-                                    <form onSubmit={handleRegister}>
-                                        <div className="mb-3">
-                                            <label className="form-label fw-semibold">
-                                                Tên tài khoản <span className="text-danger">*</span>
-                                            </label>
-                                            <input
-                                                type="text"
-                                                name="username"
-                                                className="form-control auth-form-control"
-                                                value={formData.username}
-                                                onChange={handleInputChange}
-                                                placeholder="Nhập tên tài khoản"
-                                                required
-                                            />
-                                        </div>
-                                        <div className="mb-3">
-                                            <label className="form-label fw-semibold">
-                                                Mật khẩu <span className="text-danger">*</span>
-                                            </label>
-                                            <input
-                                                type="password"
-                                                name="password"
-                                                className="form-control auth-form-control"
-                                                value={formData.password}
-                                                onChange={handleInputChange}
-                                                placeholder="Nhập mật khẩu"
-                                                required
-                                            />
-                                        </div>
-                                        {/* <div className="mb-4">
-                                            <label className="form-label fw-semibold">
-                                                Xác nhận mật khẩu <span className="text-danger">*</span>
-                                            </label>
-                                            <input
-                                                type="password"
-                                                name="confirmPassword"
-                                                className="form-control auth-form-control"
-                                                value={formData.confirmPassword}
-                                                onChange={handleInputChange}
-                                                placeholder="Nhập lại mật khẩu"
-                                                required
-                                            />
-                                        </div> */}
-                                        <button
-                                            type="submit"
-                                            className="btn auth-btn-primary w-100 text-white"
-                                            disabled={loading}
-                                        >
-                                            {loading ? (
-                                                <>
-                                                    <span className="spinner-border spinner-border-sm me-2"></span>
-                                                    Đang xử lý...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <i className="fas fa-user-plus me-2"></i>
-                                                    Đăng ký
-                                                </>
-                                            )}
-                                        </button>
-                                    </form>
-                                )}
-                            </div>
-
-                            <div className="modal-footer border-0 p-4 pt-0">
-                                <div className="w-100 text-center">
-                                    <div className="d-flex align-items-center justify-content-center mb-3">
-                                        <div className="bg-light" style={{ height: '1px', flex: 1 }}></div>
-                                        <span className="px-3 text-muted small">Hoặc</span>
-                                        <div className="bg-light" style={{ height: '1px', flex: 1 }}></div>
-                                    </div>
-                                    {authMode === 'login' ? (
-                                        <p className="text-muted mb-0">
-                                            Chưa có tài khoản?{' '}
-                                            <button
-                                                type="button"
-                                                className="btn btn-link p-0 text-decoration-none"
-                                                onClick={() => {
-                                                    setAuthMode('register');
-                                                    resetForm();
-                                                }}
-                                            >
-                                                Đăng ký ngay
-                                            </button>
-                                        </p>
-                                    ) : (
-                                        <p className="text-muted mb-0">
-                                            Đã có tài khoản?{' '}
-                                            <button
-                                                type="button"
-                                                className="btn btn-link p-0 text-decoration-none"
-                                                onClick={() => {
-                                                    setAuthMode('login');
-                                                    resetForm();
-                                                }}
-                                            >
-                                                Đăng nhập ngay
-                                            </button>
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+           
         </>
     );
 }

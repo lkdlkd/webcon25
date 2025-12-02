@@ -222,7 +222,14 @@ exports.disable2FA = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    let { username, password } = req.body;
+    let { username, password, recaptchaToken } = req.body;
+
+    // Xác thực reCAPTCHA
+    const { verifyRecaptcha } = require('../captcha/captchaController');
+    const recaptchaResult = await verifyRecaptcha(recaptchaToken);
+    if (!recaptchaResult.success) {
+      return res.status(400).json({ error: recaptchaResult.message });
+    }
 
     // Chuyển username thành chữ thường
     username = username.toLowerCase();
