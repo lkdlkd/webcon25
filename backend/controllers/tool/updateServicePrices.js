@@ -215,18 +215,19 @@ async function updateServicePrices() {
             }
 
             // Tự động cập nhật trạng thái isActive nếu config.autoactive = true
-            if (config && config.autoactive === true && serviceItem.isActive !== true) {
+            if (config && config.autoactive === true && serviceItem.isActive === false) {
               serviceItem.isActive = true;
               needSave = true;
               console.log(`✅ Đã tự động kích hoạt dịch vụ: ${serviceItem.name}`);
             }
 
-            // Cập nhật min và max nếu có trong API
-            if (apiService.min && apiService.max) {
+            // Cập nhật min và max nếu có trong API và config.autoactive = true
+            if (config && config.autoactive === true && apiService.min && apiService.max) {
               if (serviceItem.min !== apiService.min || serviceItem.max !== apiService.max) {
                 serviceItem.min = apiService.min;
                 serviceItem.max = apiService.max;
                 needSave = true;
+                console.log(`🔄 Đã cập nhật min/max cho dịch vụ: ${serviceItem.name} (min: ${apiService.min}, max: ${apiService.max})`);
               }
             }
 
