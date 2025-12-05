@@ -7,6 +7,9 @@ const Promotion = require('../../models/Promotion');
 const HistoryUser = require('../../models/History');
 const Telegram = require('../../models/Telegram');
 
+// Biến chống chồng lệnh cron
+let isRunning = false;
+
 // Hàm tạo URL API tương ứng với loại ngân hàng
 function getBankApiUrl(bank) {
     const { code, bank_password, account_number, token, url_api } = bank;
@@ -64,32 +67,38 @@ async function extractUsername(description) {
     }
 }
 // Hàm tính tiền thưởng khuyến mãi (nếu có)
-// Hàm tính tiền thưởng khuyến mãi (nếu có)
 async function calculateBonus(amount) {
-    const now = new Date(); // giờ local
-    const nowUtc = new Date(now.toISOString()); // hoặc: new Date(Date.now())
+    const now = new Date();
+    const nowUtc = new Date(now.toISOString());
 
-    const promo = await Promotion.findOne({
+    // Lấy tất cả chương trình đang hoạt động và thỏa điều kiện amount
+    const promos = await Promotion.find({
         startTime: { $lte: nowUtc },
         endTime: { $gte: nowUtc },
-    });
-    if (!promo) {
-        console.log("⚠️ Không có chương trình khuyến mãi");
-        return 0; // Không có khuyến mãi, trả về 0
-    }
-    // Kiểm tra nếu số tiền nhỏ hơn minAmount
-    if (amount < promo.minAmount) {
-        console.log(`⚠️ Số tiền (${amount}) nhỏ hơn số tiền tối thiểu (${promo.minAmount}) để được khuyến mãi`);
-        return 0; // Không áp dụng khuyến mãi
+        minAmount: { $lte: amount }
+    }).sort({ minAmount: -1 }); // Lấy minAmount cao nhất
+
+    if (!promos || promos.length === 0) {
+        console.log("⚠️ Không có chương trình khuyến mãi phù hợp");
+        return { bonus: 0, promo: null };
     }
 
-    // console.log(`🎉 Chương trình khuyến mãi: ${promo.name} - Tỷ lệ: ${promo.percentBonus}%`);
+    const promo = promos[0]; // chọn chương trình tốt nhất
+
     const bonus = Math.floor((amount * promo.percentBonus) / 100);
-    return { bonus, promo }; // Trả về tiền thưởng và tỷ lệ khuyến mãi
+    return { bonus, promo };
 }
 
+
 // Cron job mỗi 30 giây
-cron.schedule('*/30 * * * * *', async () => {
+cron.schedule('*/15 * * * * *', async () => {
+    // Chống chồng lệnh cron
+    if (isRunning) {
+        console.log('⚠️ Cron đang chạy, bỏ qua lần này...');
+        return;
+    }
+    isRunning = true;
+
     console.log('⏳ Đang chạy cron job...');
 
     try {
@@ -225,59 +234,71 @@ cron.schedule('*/30 * * * * *', async () => {
                                 : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`,
                         });
                         await historyData.save();
-                        await user.save();  
+                        await user.save();
 
                         // Thông báo Telegram
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
                         const teleConfig = await Telegram.findOne();
-                        if (teleConfig && (teleConfig.bot_notify || teleConfig.botToken)) {
-                            const adminChatId = teleConfig.chatidnaptien;
-                            const adminbottoken = teleConfig.botToken;
-                            const userbotToken = teleConfig.bot_notify;
+                        if (teleConfig && teleConfig.botToken && teleConfig.chatidnaptien) {
                             const telegramMessage =
-                                `📌 *NẠP TIỀN THÀNH CÔNG!*\n` +
-                                `📌 *Trans_id:* ${trans.transactionID || "khong co"}\n` +
-                                `👤 *Khách hàng:* ${username}\n` +
-                                `💰 *Số tiền nạp:* ${Number(Math.floor(Number(amount))).toLocaleString("en-US")}\n` +
-                                `🎁 *Khuyến mãi:* ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")}\n` +
-                                `🔹 *Tổng cộng:* ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")}\n` +
-                                `🔹 *Số dư:* ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
-                                `⏰ *Thời gian:* ${taoluc.toLocaleString("vi-VN", {
+                                `📌 NẠP TIỀN THÀNH CÔNG!\n` +
+                                `📌 Trans_id: ${trans.transactionID || "khong co"}\n` +
+                                `👤 Khách hàng: ${username}\n` +
+                                `💰 Số tiền nạp: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")}\n` +
+                                `🎁 Khuyến mãi: ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")}\n` +
+                                `📖 Nội dung: ${bonus > 0
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
+                                `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")}\n` +
+                                `🔹 Số dư: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit",
                                     month: "2-digit",
                                     year: "numeric",
                                     hour: "2-digit",
                                     minute: "2-digit",
                                     second: "2-digit",
-                                })}\n`;
+                                })}`;
                             try {
-                                if (adminChatId) {
-                                    await axios.post(`https://api.telegram.org/bot${adminbottoken}/sendMessage`, {
-                                        chat_id: adminChatId,
-                                        text: telegramMessage,
-                                        parse_mode: "Markdown",
-                                    });
-                                }
-                                if (user.telegramChatId) {
-                                    const userMessage =
-                                        `🎉 Bạn vừa nạp tiền thành công!\n` +
-                                        `💰 Số tiền: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ\n` +
-                                        (bonus > 0 ? `🎁 Khuyến mãi: +${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ\n` : '') +
-                                        `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ\n` +
-                                        `💼 Số dư mới: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
-                                        `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
-                                            day: "2-digit", month: "2-digit", year: "numeric",
-                                            hour: "2-digit", minute: "2-digit", second: "2-digit",
-                                        })}`;
-                                    await axios.post(`https://api.telegram.org/bot${userbotToken}/sendMessage`, {
-                                        chat_id: user.telegramChatId,
-                                        text: userMessage,
-                                    });
-                                }
-                                console.log("Thông báo Telegram đã được gửi.");
+                                await axios.post(`https://api.telegram.org/bot${teleConfig.botToken}/sendMessage`, {
+                                    chat_id: teleConfig.chatidnaptien,
+                                    text: telegramMessage,
+                                });
+                                console.log("Thông báo Telegram admin đã được gửi.");
                             } catch (telegramError) {
-                                console.error("Lỗi gửi thông báo Telegram:", telegramError.message);
+                                console.error("Lỗi gửi thông báo Telegram admin:", telegramError.message);
                             }
+                        }
+
+                        // Gửi thông báo cho user
+                        if (teleConfig && teleConfig.bot_notify && user.telegramChatId) {
+                            const userMessage =
+                                `🎉 Bạn vừa nạp tiền thành công!\n` +
+                                `💰 Số tiền: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ\n` +
+                                (bonus > 0 ? `🎁 Khuyến mãi: +${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ\n` : '') +
+                                `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ\n` +
+                                `💼 Số dư mới: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `📖 Nội dung: ${bonus > 0
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
+                                `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
+                                    day: "2-digit", month: "2-digit", year: "numeric",
+                                    hour: "2-digit", minute: "2-digit", second: "2-digit",
+                                })}`;
+                            try {
+                                await axios.post(`https://api.telegram.org/bot${teleConfig.bot_notify}/sendMessage`, {
+                                    chat_id: user.telegramChatId,
+                                    text: userMessage,
+                                });
+                                console.log("Thông báo Telegram user đã được gửi.");
+                            } catch (telegramError) {
+                                console.error("Lỗi gửi thông báo Telegram user:", telegramError.message);
+                            }
+                        }
+                        if (bonus > 0) {
+                            console.log(`🎁 ${bank.bank_name.toUpperCase()}: +${amount} (+${bonus} KM) => ${username}`);
+                        } else {
+                            console.log(`✅ ${bank.bank_name.toUpperCase()}: +${amount} cho ${username}`);
                         }
 
                         if (bonus > 0) {
@@ -297,5 +318,8 @@ cron.schedule('*/30 * * * * *', async () => {
 
     } catch (error) {
         console.error('❌ Cron lỗi:', error.message);
+    } finally {
+        // Luôn reset flag khi hoàn thành
+        isRunning = false;
     }
 });
