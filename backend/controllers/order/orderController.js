@@ -478,7 +478,7 @@ async function addOrder(req, res) {
         message: telegramMessage,
       });
     }
-    res.status(200).json({ success: true, message: 'Mua dịch vụ thành công' });
+    res.status(200).json({ success: true, message: 'Mua dịch vụ thành công',orderId: newMadon });
   } catch (error) {
     console.error(error);
     // Nếu có lỗi từ provider, ưu tiên trả message của provider, ẩn thông tin nhạy cảm
