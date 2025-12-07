@@ -412,7 +412,7 @@ exports.AddOrder = async (req, res) => {
                 `📌 *Đơn hàng mới đã được tạo thông qua API*!*\n` +
                 `👤 *Khách hàng:* ${username}\n` +
                 `🆔 *Mã đơn:* ${newMadon}\n` +
-                `🔹 *Dịch vụ:* ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
+                `🔹 *Dịch vụ:* ${serviceFromDb.Magoi} - ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
                 `🔗 *Link:* ${link}\n` +
                 `🔸 *Rate:* ${rateForUser}\n` +
                 `📌 *Số lượng:* ${qty}\n` +
@@ -435,6 +435,25 @@ exports.AddOrder = async (req, res) => {
             await sendTelegramNotification({
                 telegramBotToken: teleConfig.botToken,
                 telegramChatId: targetChatId,
+                message: telegramMessage,
+            });
+        }
+        if (teleConfig && teleConfig.bot_notify && user.telegramChatId) {
+            const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+            const telegramMessage = `📌 *Mua thành công đơn hàng*\n` +
+                `🆔 *Mã đơn:* ${newMadon}\n` +
+                `🔹 *Dịch vụ:*  ${serviceFromDb.Magoi} - ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
+                `🔗 *Link:* ${link}\n` +
+                `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +
+                `📆 *Ngày tạo:* ${createdAtVN.toLocaleString("vi-VN", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                })}\n`;
+
+            await sendTelegramNotification({
+                telegramBotToken: teleConfig.bot_notify,
+                telegramChatId: user.telegramChatId,
                 message: telegramMessage,
             });
         }

@@ -20,6 +20,8 @@ const { createPromotion, updatePromotion, deletePromotion, getPromotions } = req
 // const Home = require("../controllers/website/Home");
 const rateLimit = require('express-rate-limit');
 
+const scheduledController = require('@/controllers/order/scheduledController');
+
 const SmmController = require('../controllers/Smm/Smm');
 const refillCancelController = require('../controllers/order/RefilandCancelController');
 const captchaController = require('@/controllers/captcha/captchaController'); // CAPTCHA controller
@@ -79,6 +81,9 @@ router.put('/server/update/:id', authenticate.authenticateAdmin, server.updateSe
 router.post('/order/add', authenticate.authenticateUser, addOrder); // ok Thêm đơn hàng mới
 router.get('/order', authenticate.authenticateUser, getOrders); // ok Lấy danh sách đơn hàng của người dùng
 router.put('/order/update/:Madon', authenticate.authenticateAdmin, updateOrderStatus); // Cập nhật trạng thái đơn hàng
+router.get('/scheduled-orders', authenticate.authenticateUser, scheduledController.getScheduledOrders);
+router.patch('/scheduled-orders/:id/reschedule', authenticate.authenticateUser, scheduledController.rescheduleScheduledOrder);
+router.delete('/scheduled-orders/:id', authenticate.authenticateUser, scheduledController.cancelScheduledOrder);
 // router admin
 router.put('/user/update/:id', authenticate.authenticateAdmin, user.updateUser); // ok Cập nhật thông tin người dùng
 router.post('/user/addbalance/:id', authenticate.authenticateAdmin, user.addBalance); //ok Thêm tiền vào tài khoản người dùng

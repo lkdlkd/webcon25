@@ -79,6 +79,7 @@ app.use('/api/noti', noti);
 // ================= Bootstrap background services (Telegram bot + SMM cron) =================
 const { bootstrapTelegramAndCrons } = require('@/controllers/Smm/telegramBot');
 bootstrapTelegramAndCrons();
+require('@/cron/scheduledOrderCron'); // Cronjob xử lý đơn hàng hẹn giờ
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));

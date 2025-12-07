@@ -6,7 +6,7 @@ const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // hoặc đường dẫn tương ứng
 const Telegram = require('../../models/Telegram');
 const Counter = require('../../models/Counter');
-
+const Scheduled = require('../../models/Scheduled');
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
   try {
@@ -150,8 +150,11 @@ async function addOrder(req, res) {
     const username = user.username;
 
     // Lấy thông tin từ body
-    const { link, category, quantity, magoi, note, comments, ObjectLink } = req.body;
+    const { link, category, quantity, magoi, note, comments, ObjectLink, isScheduled, scheduleTime } = req.body;
     const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error('Số lượng không hợp lệ');
+    }
     const formattedComments = comments ? comments.replace(/\r?\n/g, "\r\n") : "";
 
     // Lấy thông tin dịch vụ
@@ -165,6 +168,59 @@ async function addOrder(req, res) {
     // Kiểm tra nếu là đơn tay (ordertay = true)
     const isManualOrder = serviceFromDb.ordertay === true ? true : false;
 
+    if (isScheduled === true) {
+      if (!scheduleTime) {
+        throw new Error('Vui lòng chọn thời gian hẹn giờ');
+      }
+      // Kiểm tra số dư trước, tránh đặt lịch vượt quá tiền
+      const serviceFromDb = await fetchServiceData(magoi);
+      const rateForUser = getEffectiveRate(serviceFromDb, user);
+      const totalCost = rateForUser * qty;
+
+      if (user.balance < totalCost) {
+        throw new Error('Số dư không đủ để đặt lịch đơn này');
+      }
+      const scheduleDate = new Date(scheduleTime);
+      if (Number.isNaN(scheduleDate.getTime())) {
+        throw new Error('Thời gian hẹn giờ không hợp lệ');
+      }
+
+      const now = new Date();
+      if (scheduleDate <= now) {
+        throw new Error('Thời gian hẹn giờ phải lớn hơn thời điểm hiện tại');
+      }
+
+      if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
+        throw new Error('Số lượng không hợp lệ');
+      }
+      if (serviceFromDb.isActive === false) {
+        throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
+      }
+
+      const scheduledOrder = new Scheduled({
+        username,
+        link,
+        category,
+        quantity: qty,
+        magoi,
+        note,
+        comments: formattedComments,
+        ObjectLink,
+        scheduleTime: scheduleDate,
+        estimatedCost: totalCost,
+        serviceRate: rateForUser,
+        serviceName: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
+        isManualOrder,
+        status: 'Pending',
+      });
+
+      await scheduledOrder.save();
+
+      return res.status(201).json({
+        success: true,
+        message: 'Đơn hàng đã được hẹn giờ thành công!',
+      });
+    }
     if (!isManualOrder) {
       // Chỉ kiểm tra giá nếu ischeck = true
       if (serviceFromDb.ischeck !== true && apiRate > rateForUser) {
@@ -367,7 +423,7 @@ async function addOrder(req, res) {
       const telegramMessage = `📌 *Đơn hàng mới đã được tạo!*\n` +
         `👤 *Khách hàng:* ${username}\n` +
         `🆔 *Mã đơn:* ${newMadon}\n` +
-        `🔹 *Dịch vụ:* ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
+        `🔹 *Dịch vụ:* ${serviceFromDb.Magoi} - ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
         `🔗 *Link:* ${link}\n` +
         `🔸 *Rate:* ${rateForUser}\n` +
         `📌 *Số lượng:* ${qty}\n` +
@@ -384,7 +440,7 @@ async function addOrder(req, res) {
         })}\n` +
         `📝 *Ghi chú:* ${note || 'Không có'}\n` +
         `Nguồn: ${serviceFromDb.DomainSmm.name}`;
-      
+
       // Nếu là đơn tay, gửi đến chatiddontay
       const targetChatId = isManualOrder && teleConfig.chatiddontay ? teleConfig.chatiddontay : teleConfig.chatId;
       await sendTelegramNotification({
@@ -394,6 +450,25 @@ async function addOrder(req, res) {
       });
     }
 
+    if (teleConfig && teleConfig.bot_notify && user.telegramChatId) {
+      const createdAtVN = new Date(createdAt.getTime() + 7 * 60 * 60 * 1000);
+      const telegramMessage = `📌 *Mua thành công đơn hàng*\n` +
+        `🆔 *Mã đơn:* ${newMadon}\n` +
+        `🔹 *Dịch vụ:* ${serviceFromDb.Magoi} - ${serviceFromDb.maychu} ${serviceFromDb.name}\n` +
+        `🔗 *Link:* ${link}\n` +
+        `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +
+        `📆 *Ngày tạo:* ${createdAtVN.toLocaleString("vi-VN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        })}\n`;
+
+      await sendTelegramNotification({
+        telegramBotToken: teleConfig.bot_notify,
+        telegramChatId: user.telegramChatId,
+        message: telegramMessage,
+      });
+    }
     res.status(200).json({ success: true, message: 'Mua dịch vụ thành công' });
   } catch (error) {
     console.error(error);
