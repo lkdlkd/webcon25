@@ -109,12 +109,21 @@ exports.adminApproveRefund = async (req, res) => {
                     continue;
                 }
 
-                const tiencu = Number(targetUser.balance || 0);
                 const soTienHoan = Number(refund.tonghoan || 0);
 
-                // Cập nhật số dư và trạng thái hoàn tiền
-                targetUser.balance = tiencu + soTienHoan;
-                await targetUser.save();
+                // Cập nhật số dư bằng atomic operation để tránh race condition
+                const updatedUser = await User.findOneAndUpdate(
+                    { username: refund.username },
+                    { $inc: { balance: soTienHoan } },
+                    { new: true }
+                );
+                
+                if (!updatedUser) {
+                    failures.push({ madon: code, reason: 'Không thể cập nhật số dư người dùng.' });
+                    continue;
+                }
+                
+                const tiencu = updatedUser.balance - soTienHoan;
 
                 refund.status = true;
                 await refund.save();
@@ -133,7 +142,7 @@ exports.adminApproveRefund = async (req, res) => {
                     link: refund.link || '',
                     tienhientai: tiencu,
                     tongtien: soTienHoan,
-                    tienconlai: targetUser.balance,
+                    tienconlai: updatedUser.balance,
                     createdAt: new Date(),
                     mota: `${refund.noidung}`,
                 });

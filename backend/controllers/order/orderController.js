@@ -7,6 +7,7 @@ const SmmApiService = require('../Smm/smmServices'); // hoặc đường dẫn t
 const Telegram = require('../../models/Telegram');
 const Counter = require('../../models/Counter');
 const Scheduled = require('../../models/Scheduled');
+const User = require('../../models/User');
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
   try {
@@ -294,10 +295,18 @@ async function addOrder(req, res) {
       purchaseOrderId = purchaseResponse.order;
     }
 
-    // Cập nhật số dư và lưu đơn hàng
-    const newBalance = user.balance - totalCost;
-    user.balance = newBalance;
-    await user.save();
+    // Cập nhật số dư bằng atomic operation để tránh race condition
+    const userUpdateResult = await User.findOneAndUpdate(
+      { username },
+      { $inc: { balance: -totalCost } },
+      { new: true }
+    );
+
+    if (!userUpdateResult) {
+      throw new Error('Không thể cập nhật số dư');
+    }
+
+    const newBalance = userUpdateResult.balance;
 
     // Lấy mã đơn từ Counter (tự động tăng)
     let counter = await Counter.findOne({ name: 'orderCounter' });
@@ -400,7 +409,7 @@ async function addOrder(req, res) {
       madon: newMadon,
       hanhdong: 'Tạo đơn hàng',
       link,
-      tienhientai: user.balance + totalCost,
+      tienhientai: newBalance + totalCost,
       tongtien: totalCost,
       tienconlai: newBalance,
       createdAt,
@@ -427,7 +436,7 @@ async function addOrder(req, res) {
         `🔗 *Link:* ${link}\n` +
         `🔸 *Rate:* ${rateForUser}\n` +
         `📌 *Số lượng:* ${qty}\n` +
-        `💰 *Tiền cũ:* ${Number(Math.floor(Number(user.balance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
+        `💰 *Tiền cũ:* ${Number(Math.floor(Number(newBalance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
         `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +
         `💰 *Tiền còn lại:* ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
         `📆 *Ngày tạo:* ${createdAtVN.toLocaleString("vi-VN", {

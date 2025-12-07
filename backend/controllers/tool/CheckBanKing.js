@@ -202,19 +202,37 @@ cron.schedule('*/15 * * * * *', async () => {
 
                     // 3) Chỉ cộng tiền và tạo lịch sử khi vừa insert mới
                     if (user && trans.type === 'IN') {
-                        const tiencu = user.balance;
-                        user.balance += (totalAmount || amount);
-                        user.tongnap = (user.tongnap || 0) + (totalAmount || amount);
-                        user.tongnapthang = (user.tongnapthang || 0) + (totalAmount || amount);
+                        // Cập nhật số dư bằng atomic operation để tránh race condition
+                        const userUpdateResult = await User.findOneAndUpdate(
+                            { username },
+                            {
+                                $inc: {
+                                    balance: (totalAmount || amount),
+                                    tongnap: (totalAmount || amount),
+                                    tongnapthang: (totalAmount || amount)
+                                }
+                            },
+                            { new: true }
+                        );
+
+                        if (!userUpdateResult) {
+                            console.error(`⚠️ Không thể cập nhật số dư cho user: ${username}`);
+                            continue;
+                        }
+
+                        const tiencu = userUpdateResult.balance - (totalAmount || amount);
+                        const newBalance = userUpdateResult.balance;
 
                         try {
                             const cfg = await Configweb.findOne();
                             const vipThreshold = Number(cfg?.daily) || 0;
                             const distributorThreshold = Number(cfg?.distributor) || 0;
-                            if (user.tongnap >= distributorThreshold) {
-                                user.capbac = 'distributor';
-                            } else if (user.tongnap >= vipThreshold) {
-                                user.capbac = 'vip';
+                            if (userUpdateResult.tongnap >= distributorThreshold) {
+                                userUpdateResult.capbac = 'distributor';
+                                await userUpdateResult.save();
+                            } else if (userUpdateResult.tongnap >= vipThreshold) {
+                                userUpdateResult.capbac = 'vip';
+                                await userUpdateResult.save();
                             }
                         } catch (cfgErr) {
                             console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
@@ -227,14 +245,13 @@ cron.schedule('*/15 * * * * *', async () => {
                             link: "",
                             tienhientai: tiencu,
                             tongtien: (totalAmount || amount),
-                            tienconlai: user.balance,
+                            tienconlai: newBalance,
                             createdAt: new Date(),
                             mota: bonus > 0
                                 ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
                                 : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`,
                         });
                         await historyData.save();
-                        await user.save();
 
                         // Thông báo Telegram
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
@@ -250,7 +267,7 @@ cron.schedule('*/15 * * * * *', async () => {
                                     ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
                                     : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
                                 `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")}\n` +
-                                `🔹 Số dư: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `🔹 Số dư: ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
                                 `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit",
                                     month: "2-digit",
@@ -271,13 +288,13 @@ cron.schedule('*/15 * * * * *', async () => {
                         }
 
                         // Gửi thông báo cho user
-                        if (teleConfig && teleConfig.bot_notify && user.telegramChatId) {
+                        if (teleConfig && teleConfig.bot_notify && userUpdateResult.telegramChatId) {
                             const userMessage =
                                 `🎉 Bạn vừa nạp tiền thành công!\n` +
                                 `💰 Số tiền: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ\n` +
                                 (bonus > 0 ? `🎁 Khuyến mãi: +${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ\n` : '') +
                                 `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ\n` +
-                                `💼 Số dư mới: ${Number(Math.floor(Number(user.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `💼 Số dư mới: ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
                                 `📖 Nội dung: ${bonus > 0
                                     ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
                                     : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
@@ -287,7 +304,7 @@ cron.schedule('*/15 * * * * *', async () => {
                                 })}`;
                             try {
                                 await axios.post(`https://api.telegram.org/bot${teleConfig.bot_notify}/sendMessage`, {
-                                    chat_id: user.telegramChatId,
+                                    chat_id: userUpdateResult.telegramChatId,
                                     text: userMessage,
                                 });
                                 console.log("Thông báo Telegram user đã được gửi.");
@@ -295,12 +312,6 @@ cron.schedule('*/15 * * * * *', async () => {
                                 console.error("Lỗi gửi thông báo Telegram user:", telegramError.message);
                             }
                         }
-                        if (bonus > 0) {
-                            console.log(`🎁 ${bank.bank_name.toUpperCase()}: +${amount} (+${bonus} KM) => ${username}`);
-                        } else {
-                            console.log(`✅ ${bank.bank_name.toUpperCase()}: +${amount} cho ${username}`);
-                        }
-
                         if (bonus > 0) {
                             console.log(`🎁 ${bank.bank_name.toUpperCase()}: +${amount} (+${bonus} KM) => ${username}`);
                         } else {

@@ -279,10 +279,18 @@ exports.AddOrder = async (req, res) => {
             purchaseOrderId = purchaseResponse.order;
         }
 
-        // --- Bước 5: Trừ số tiền vào tài khoản người dùng ---
-        const newBalance = user.balance - totalCost;
-        user.balance = newBalance;
-        await user.save();
+        // --- Bước 5: Trừ số tiền bằng atomic operation để tránh race condition ---
+        const updatedUser = await User.findOneAndUpdate(
+            { username: user.username },
+            { $inc: { balance: -totalCost } },
+            { new: true }
+        );
+        
+        if (!updatedUser) {
+            throw new Error('Không thể cập nhật số dư');
+        }
+        
+        const newBalance = updatedUser.balance;
 
         // Lấy mã đơn từ Counter (tự động tăng)
         let counter = await Counter.findOne({ name: 'orderCounter' });
@@ -388,7 +396,7 @@ exports.AddOrder = async (req, res) => {
             madon: newMadon,
             hanhdong: 'Tạo đơn hàng',
             link,
-            tienhientai: user.balance + totalCost,
+            tienhientai: newBalance + totalCost,
             tongtien: totalCost,
             tienconlai: newBalance,
             createdAt,
@@ -416,7 +424,7 @@ exports.AddOrder = async (req, res) => {
                 `🔗 *Link:* ${link}\n` +
                 `🔸 *Rate:* ${rateForUser}\n` +
                 `📌 *Số lượng:* ${qty}\n` +
-                `💰 *Tiền cũ:* ${Number(Math.floor(Number(user.balance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
+                `💰 *Tiền cũ:* ${Number(Math.floor(Number(newBalance + totalCost))).toLocaleString("en-US")} VNĐ\n` +
                 `💰 *Tổng tiền:* ${Number(Math.floor(Number(totalCost))).toLocaleString("en-US")} VNĐ\n` +
                 `💰 *Tiền còn lại:* ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
                 `📆 *Ngày tạo:* ${createdAtVN.toLocaleString("vi-VN", {

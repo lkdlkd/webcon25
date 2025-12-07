@@ -217,10 +217,18 @@ async function processSingleScheduledOrder(pendingOrder) {
       purchaseOrderId = purchaseResponse.order;
     }
 
-    // Trừ tiền
-    const newBalance = user.balance - totalCost;
-    user.balance = newBalance;
-    await user.save();
+    // Trừ tiền bằng atomic operation để tránh race condition
+    const updatedUser = await User.findOneAndUpdate(
+      { username: lockedOrder.username },
+      { $inc: { balance: -totalCost } },
+      { new: true }
+    );
+    
+    if (!updatedUser) {
+      throw new Error('Không thể cập nhật số dư');
+    }
+    
+    const newBalance = updatedUser.balance;
 
     // Tạo mã đơn nội bộ
     const newMadon = await getNextOrderCode();
@@ -259,7 +267,7 @@ async function processSingleScheduledOrder(pendingOrder) {
       madon: newMadon,
       hanhdong: 'Tạo đơn hàng',
       link: lockedOrder.link,
-      tienhientai: user.balance + totalCost,
+      tienhientai: newBalance + totalCost,
       tongtien: totalCost,
       tienconlai: newBalance,
       createdAt: now,
@@ -307,7 +315,7 @@ async function processSingleScheduledOrder(pendingOrder) {
         message: telegramMessage,
       });
     }
-    if (teleConfig && teleConfig.bot_notify && user.telegramChatId) {
+    if (teleConfig && teleConfig.bot_notify && updatedUser.telegramChatId) {
       const createdAtVN = new Date(now.getTime() + 7 * 60 * 60 * 1000);
       const telegramMessage = `📌 *Mua thành công đơn hàng*\n` +
         `🆔 *Mã đơn:* ${newMadon}\n` +
@@ -322,7 +330,7 @@ async function processSingleScheduledOrder(pendingOrder) {
 
       await sendTelegramNotification({
         telegramBotToken: teleConfig.bot_notify,
-        telegramChatId: user.telegramChatId,
+        telegramChatId: updatedUser.telegramChatId,
         message: telegramMessage,
       });
     }

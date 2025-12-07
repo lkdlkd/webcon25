@@ -93,43 +93,56 @@ exports.rechargeCardStatus = async () => {
 
                         const note = `Hệ thống nạp thẻ nạp tiền tự động cho bạn số tiền ${chietkhau.toLocaleString("vi-VN")} của thẻ cào số seri ${card.serial}`;
 
+                        // Cập nhật thẻ cào
+                        card.real_amount = chietkhau;
+                        card.status = "success";
+                        await card.save();
+
+                        // Cập nhật số dư bằng atomic operation để tránh race condition
+                        const tiencu = userData.balance;
+                        const updatedUser = await User.findOneAndUpdate(
+                            { username: userData.username },
+                            {
+                                $inc: {
+                                    balance: chietkhau,
+                                    tongnap: chietkhau,
+                                    tongnapthang: chietkhau
+                                }
+                            },
+                            { new: true }
+                        );
+
+                        if (!updatedUser) {
+                            console.error(`Không thể cập nhật số dư cho user: ${userData.username}`);
+                            continue;
+                        }
+
+                        // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
+                        try {
+                            const cfg = await Configweb.findOne();
+                            const vipThreshold = Number(cfg?.daily) || 0;
+                            const distributorThreshold = Number(cfg?.distributor) || 0;
+                            if (updatedUser.tongnap >= distributorThreshold) {
+                                updatedUser.capbac = 'distributor';
+                                await updatedUser.save();
+                            } else if (updatedUser.tongnap >= vipThreshold) {
+                                updatedUser.capbac = 'vip';
+                                await updatedUser.save();
+                            }
+                        } catch (cfgErr) {
+                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
+                        }
+
                         // Tạo giao dịch mới (HistoryUser)
                         await Transaction.create({
                             username: userData.username,
                             madon: " ",
                             hanhdong: "nạp tiền thẻ cào",
                             tongtien: chietkhau,
-                            tienhientai: userData.balance,
-                            tienconlai: userData.balance + chietkhau,
+                            tienhientai: tiencu,
+                            tienconlai: updatedUser.balance,
                             mota: note,
                         });
-
-                        // Cập nhật thẻ cào và số dư của người dùng
-                        card.real_amount = chietkhau;
-                        card.status = "success";
-                        await card.save();
-
-                        userData.balance += chietkhau;
-                        userData.tongnapthang = (userData.tongnapthang || 0) + chietkhau;
-                        userData.tongnap = (userData.tongnap || 0) + chietkhau;
-
-                        // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
-                        try {
-                            const cfg = await Configweb.findOne();
-                            const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
-                            const distributorThreshold = Number(cfg?.distributor) || 0;
-                            if (userData.tongnap >= distributorThreshold) {
-                                userData.capbac = 'distributor';
-                            } else if (userData.tongnap >= vipThreshold) {
-                                userData.capbac = 'vip';
-                            } else {
-                                // giữ nguyên nếu chưa đạt ngưỡng
-                            }
-                        } catch (cfgErr) {
-                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
-                        }
-
-                        await userData.save();
                         // Gửi thông báo Telegram nếu có cấu hình
                         const teleConfig = await Telegram.findOne();
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
@@ -141,7 +154,7 @@ exports.rechargeCardStatus = async () => {
                                 `📌 *NẠP TIỀN THẺ CÀO!*\n` +
                                 `👤 *Khách hàng:* ${card.username}\n` +
                                 `👤 *Cộng tiền:* nạp thẻ thành công số tiền ${chietkhau}.\n` +
-                                `🔹 *Số dư mới:* ${Number(Math.floor(Number(userData.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                `🔹 *Số dư mới:* ${Number(Math.floor(Number(updatedUser.balance))).toLocaleString("en-US")} VNĐ\n` +
                                 `🔹 *Tạo lúc:* ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit",
                                     month: "2-digit",
@@ -159,12 +172,12 @@ exports.rechargeCardStatus = async () => {
                                     });
                                 }
                                 // Gửi riêng cho user nếu đã liên kết Telegram
-                                if (userData.telegramChatId) {
+                                if (updatedUser.telegramChatId) {
                                     const userMessage =
                                         `🎉 Nạp thẻ thành công!\n` +
                                         `💳 Mệnh giá: ${card.amount.toLocaleString()}\n` +
                                         `✅ Cộng vào tài khoản: ${chietkhau.toLocaleString()}\n` +
-                                        `💼 Số dư mới: ${Number(Math.floor(Number(userData.balance))).toLocaleString("en-US")} VNĐ\n` +
+                                        `💼 Số dư mới: ${Number(Math.floor(Number(updatedUser.balance))).toLocaleString("en-US")} VNĐ\n` +
                                         `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                             day: "2-digit", month: "2-digit", year: "numeric",
                                             hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -196,41 +209,54 @@ exports.rechargeCardStatus = async () => {
 
                         const note = `Thẻ cào thành công nhưng sai mệnh giá. Chỉ nhận ${chietkhau2.toLocaleString("vi-VN")} VNĐ.`;
 
-                        await Transaction.create({
-                            username: userData.username,
-                            madon: " ",
-                            hanhdong: "nạp tiền thẻ cào - sai mệnh giá",
-                            tongtien: chietkhau2,
-                            tienhientai: userData.balance,
-                            tienconlai: userData.balance + chietkhau2,
-                            mota: note,
-                        });
-
                         card.real_amount = chietkhau2;
                         card.status = "warning";
                         await card.save();
 
-                        userData.balance += chietkhau2;
-                        userData.tongnapthang = (userData.tongnapthang || 0) + chietkhau2;
-                        userData.tongnap = (userData.tongnap || 0) + chietkhau2;
+                        // Cập nhật số dư bằng atomic operation để tránh race condition
+                        const tiencu = userData.balance;
+                        const updatedUser = await User.findOneAndUpdate(
+                            { username: userData.username },
+                            {
+                                $inc: {
+                                    balance: chietkhau2,
+                                    tongnap: chietkhau2,
+                                    tongnapthang: chietkhau2
+                                }
+                            },
+                            { new: true }
+                        );
+
+                        if (!updatedUser) {
+                            console.error(`Không thể cập nhật số dư cho user: ${userData.username}`);
+                            continue;
+                        }
 
                         // Xếp hạng cấp bậc dựa trên tổng nạp và cấu hình
                         try {
                             const cfg = await Configweb.findOne();
-                            const vipThreshold = Number(cfg?.daily) || 0; // cấu hình 'daily'
+                            const vipThreshold = Number(cfg?.daily) || 0;
                             const distributorThreshold = Number(cfg?.distributor) || 0;
-                            if (userData.tongnap >= distributorThreshold) {
-                                userData.capbac = 'distributor';
-                            } else if (userData.tongnap >= vipThreshold) {
-                                userData.capbac = 'vip';
-                            } else {
-                                // giữ nguyên nếu chưa đạt ngưỡng
+                            if (updatedUser.tongnap >= distributorThreshold) {
+                                updatedUser.capbac = 'distributor';
+                                await updatedUser.save();
+                            } else if (updatedUser.tongnap >= vipThreshold) {
+                                updatedUser.capbac = 'vip';
+                                await updatedUser.save();
                             }
                         } catch (cfgErr) {
                             console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
                         }
 
-                        await userData.save();
+                        await Transaction.create({
+                            username: userData.username,
+                            madon: " ",
+                            hanhdong: "nạp tiền thẻ cào - sai mệnh giá",
+                            tongtien: chietkhau2,
+                            tienhientai: tiencu,
+                            tienconlai: updatedUser.balance,
+                            mota: note,
+                        });
 
                         // Gửi thông báo Telegram nếu có cấu hình
                         const teleConfig = await Telegram.findOne();
