@@ -212,16 +212,10 @@ exports.AddOrder = async (req, res) => {
         }
 
         if (!serviceFromDb.isActive) {
-            throw new Error("Dịch vụ bảo trì, vui lòng mua sv khác");
+            throw new Error("Dịch vụ bảo trì, vui lòng liên hệ admin");
         }
         if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
             throw new Error('Số lượng không hợp lệ');
-        }
-        if (user.balance < totalCost) {
-            throw new Error('Số dư không đủ để thực hiện giao dịch');
-        }
-        if (serviceFromDb.isActive === false) {
-            throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
         }
         // Nếu có chiết khấu hợp lệ, giảm số lượng gửi cho API
         let apiQuantity = qty;
@@ -236,6 +230,13 @@ exports.AddOrder = async (req, res) => {
         const tientieu = apiRate * apiQuantity;
         const lai = totalCost - tientieu;
 
+        // --- Bước 5: Kiểm tra số dư từ DB (fresh data) trước khi gọi API ---
+        const userCheck = await User.findOne({ username: user.username }).select('balance');
+        if (!userCheck || userCheck.balance < totalCost) {
+            throw new Error('Số dư không đủ để thực hiện giao dịch');
+        }
+
+        // --- Bước 6: Gọi API provider (sau khi đã chắc chắn đủ tiền) ---
         let purchaseOrderId;
 
         if (isManualOrder) {
@@ -279,17 +280,21 @@ exports.AddOrder = async (req, res) => {
             purchaseOrderId = purchaseResponse.order;
         }
 
-        // --- Bước 5: Trừ số tiền bằng atomic operation để tránh race condition ---
+        // --- Bước 7: API thành công, bây giờ mới trừ tiền với atomic operation ---
         const updatedUser = await User.findOneAndUpdate(
-            { username: user.username },
+            {
+                username: user.username,
+                balance: { $gte: totalCost } // Double-check để tránh race condition
+            },
             { $inc: { balance: -totalCost } },
             { new: true }
         );
-        
+
         if (!updatedUser) {
-            throw new Error('Không thể cập nhật số dư');
+            // Trường hợp hiếm: giữa lúc check và lúc trừ, user đã mua đơn khác
+            throw new Error('Số dư không đủ để thực hiện giao dịch');
         }
-        
+
         const newBalance = updatedUser.balance;
 
         // Lấy mã đơn từ Counter (tự động tăng)
@@ -457,6 +462,9 @@ exports.AddOrder = async (req, res) => {
                     day: "2-digit",
                     month: "2-digit",
                     year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
                 })}\n`;
 
             await sendTelegramNotification({

@@ -232,9 +232,6 @@ async function addOrder(req, res) {
     if (qty < serviceFromDb.min || qty > serviceFromDb.max) {
       throw new Error('Số lượng không hợp lệ');
     }
-    if (user.balance < totalCost) {
-      throw new Error('Số dư không đủ để thực hiện giao dịch');
-    }
     if (serviceFromDb.isActive === false) {
       throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
     }
@@ -251,6 +248,13 @@ async function addOrder(req, res) {
     const tientieu = apiRate * apiQuantity;
     const lai = totalCost - tientieu;
 
+    // Bước 1: Kiểm tra số dư từ DB (fresh data) trước khi gọi API
+    const userCheck = await User.findOne({ username }).select('balance');
+    if (!userCheck || userCheck.balance < totalCost) {
+      throw new Error('Số dư không đủ để thực hiện giao dịch');
+    }
+
+    // Bước 2: Gọi API provider (sau khi đã chắc chắn đủ tiền)
     let purchaseOrderId;
 
     if (isManualOrder) {
@@ -295,15 +299,19 @@ async function addOrder(req, res) {
       purchaseOrderId = purchaseResponse.order;
     }
 
-    // Cập nhật số dư bằng atomic operation để tránh race condition
+    // Bước 3: API thành công, bây giờ mới trừ tiền với atomic operation
     const userUpdateResult = await User.findOneAndUpdate(
-      { username },
+      {
+        username,
+        balance: { $gte: totalCost } // Double-check để tránh race condition
+      },
       { $inc: { balance: -totalCost } },
       { new: true }
     );
 
     if (!userUpdateResult) {
-      throw new Error('Không thể cập nhật số dư');
+      // Trường hợp hiếm: giữa lúc check và lúc trừ, user đã mua đơn khác
+      throw new Error('Số dư không đủ để thực hiện giao dịch');
     }
 
     const newBalance = userUpdateResult.balance;
@@ -470,6 +478,9 @@ async function addOrder(req, res) {
           day: "2-digit",
           month: "2-digit",
           year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
         })}\n`;
 
       await sendTelegramNotification({
@@ -478,7 +489,7 @@ async function addOrder(req, res) {
         message: telegramMessage,
       });
     }
-    res.status(200).json({ success: true, message: 'Mua dịch vụ thành công',orderId: newMadon });
+    res.status(200).json({ success: true, message: 'Mua dịch vụ thành công', orderId: newMadon });
   } catch (error) {
     console.error(error);
     // Nếu có lỗi từ provider, ưu tiên trả message của provider, ẩn thông tin nhạy cảm

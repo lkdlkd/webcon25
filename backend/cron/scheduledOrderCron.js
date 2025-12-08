@@ -175,14 +175,6 @@ async function processSingleScheduledOrder(pendingOrder) {
       }
     }
 
-    if (user.balance < totalCost) {
-      throw new Error('Số dư không đủ để thực hiện giao dịch');
-    }
-
-    if (service.isActive === false) {
-      throw new Error('Dịch vụ bảo trì, vui lòng liên hệ admin');
-    }
-
     const formattedComments = lockedOrder.comments ? lockedOrder.comments.replace(/\r?\n/g, '\r\n') : '';
 
     // Xử lý chiết khấu giống orderController
@@ -195,7 +187,15 @@ async function processSingleScheduledOrder(pendingOrder) {
     const tientieu = apiRate * apiQuantity;
     const lai = totalCost - tientieu;
 
+    // Bước 1: Kiểm tra số dư từ DB (fresh data) trước khi gọi API
+    const userCheck = await User.findOne({ username: lockedOrder.username }).select('balance');
+    if (!userCheck || userCheck.balance < totalCost) {
+      throw new Error('Số dư không đủ để thực hiện giao dịch');
+    }
+
+    // Bước 2: Gọi API provider (sau khi đã chắc chắn đủ tiền)
     let purchaseOrderId;
+
     if (isManualOrder) {
       purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
     } else {
@@ -217,17 +217,21 @@ async function processSingleScheduledOrder(pendingOrder) {
       purchaseOrderId = purchaseResponse.order;
     }
 
-    // Trừ tiền bằng atomic operation để tránh race condition
+    // Bước 3: API thành công, bây giờ mới trừ tiền với atomic operation
     const updatedUser = await User.findOneAndUpdate(
-      { username: lockedOrder.username },
+      {
+        username: lockedOrder.username,
+        balance: { $gte: totalCost } // Double-check để tránh race condition
+      },
       { $inc: { balance: -totalCost } },
       { new: true }
     );
-    
+
     if (!updatedUser) {
-      throw new Error('Không thể cập nhật số dư');
+      // Trường hợp hiếm: giữa lúc check và lúc trừ, user đã mua đơn khác
+      throw new Error('Số dư không đủ để thực hiện giao dịch');
     }
-    
+
     const newBalance = updatedUser.balance;
 
     // Tạo mã đơn nội bộ
@@ -326,6 +330,9 @@ async function processSingleScheduledOrder(pendingOrder) {
           day: "2-digit",
           month: "2-digit",
           year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
         })}\n`;
 
       await sendTelegramNotification({
