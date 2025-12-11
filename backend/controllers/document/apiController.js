@@ -182,8 +182,8 @@ exports.AddOrder = async (req, res) => {
         res.status(401).json({ error: 'api Key không hợp lệ' });
         return null;
     }
-    if (user.status && user.status !== 'active') {
-        return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
+    if (user.status !== 'active') {
+        return res.status(403).json({ success: false, error: "Tài khoản của bạn đã bị khóa" });
     }
     if (!magoi || !link || !quantity) {
         return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (service, link, quantity)' });
@@ -230,72 +230,100 @@ exports.AddOrder = async (req, res) => {
         const tientieu = apiRate * apiQuantity;
         const lai = totalCost - tientieu;
 
-        // --- Bước 5: Kiểm tra số dư từ DB (fresh data) trước khi gọi API ---
-        const userCheck = await User.findOne({ username: user.username }).select('balance');
-        if (!userCheck || userCheck.balance < totalCost) {
+        // Pre-check: Lấy số dư mới nhất từ DB để reject sớm (tránh rollback không cần thiết)
+        const currentUser = await User.findOne({ username: user.username }).select('balance');
+        if (!currentUser || currentUser.balance < totalCost) {
             throw new Error('Số dư không đủ để thực hiện giao dịch');
         }
 
-        // --- Bước 6: Gọi API provider (sau khi đã chắc chắn đủ tiền) ---
-        let purchaseOrderId;
-
-        if (isManualOrder) {
-            // Đơn tay: tạo orderId ngẫu nhiên
-            purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
-        } else {
-            // Đơn API: gửi yêu cầu mua dịch vụ qua API bên thứ 3
-            const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
-            const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
-
-            const purchasePayload = {
-                link,
-                quantity: apiQuantity,
-                service: serviceFromDb.serviceId,
-                comments: formattedComments,
-            };
-
-            const purchaseResponse = await smm.order(purchasePayload);
-            if (!purchaseResponse || !purchaseResponse.order) {
-                const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
-
-                if (nestedError) {
-                    console.error('Đối tác trả về lỗi', nestedError);
-                    const errRaw = String(nestedError);
-                    const errStr = errRaw.toLowerCase();
-                    // Nhạy cảm: số dư, đường link, số điện thoại VN
-                    const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
-                    const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
-                    const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
-                        || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
-                    if (isSensitive) {
-                        throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
-                    } else {
-                        throw new Error(String(nestedError));
-                    }
-                } else {
-                    throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
-                }
-            }
-
-            purchaseOrderId = purchaseResponse.order;
-        }
-
-        // --- Bước 7: API thành công, bây giờ mới trừ tiền với atomic operation ---
+        // --- Bước 1: Trừ tiền trước khi gọi API provider (atomic để handle race condition) ---
         const updatedUser = await User.findOneAndUpdate(
             {
                 username: user.username,
-                balance: { $gte: totalCost } // Double-check để tránh race condition
+                balance: { $gte: totalCost }
             },
             { $inc: { balance: -totalCost } },
             { new: true }
         );
 
         if (!updatedUser) {
-            // Trường hợp hiếm: giữa lúc check và lúc trừ, user đã mua đơn khác
             throw new Error('Số dư không đủ để thực hiện giao dịch');
         }
 
-        const newBalance = updatedUser.balance;
+        const oldBalance = updatedUser.balance + totalCost; // Số dư trước khi trừ
+        const newBalance = updatedUser.balance; // Số dư sau khi trừ
+
+        // Kiểm tra số dư âm - nếu âm thì ban user và rollback
+        if (newBalance < 0) {
+            console.error('⚠️ Phát hiện số dư âm:', username, 'số dư:', newBalance);
+            await User.findOneAndUpdate(
+                { username },
+                { 
+                    $inc: { balance: totalCost },
+                    $set: { status: 'banned' }
+                }
+            );
+            throw new Error('Tài khoản đã bị khóa do phát hiện bất thường về số dư');
+        }
+
+        // --- Bước 2: Gọi API provider ---
+        let purchaseOrderId;
+        let providerError = null;
+
+        if (isManualOrder) {
+            // Đơn tay: tạo orderId ngẫu nhiên
+            purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
+        } else {
+            try {
+                // Đơn API: gửi yêu cầu mua dịch vụ qua API bên thứ 3
+                const smmSvConfig = await fetchSmmConfig(serviceFromDb.DomainSmm);
+                const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
+
+                const purchasePayload = {
+                    link,
+                    quantity: apiQuantity,
+                    service: serviceFromDb.serviceId,
+                    comments: formattedComments,
+                };
+
+                const purchaseResponse = await smm.order(purchasePayload);
+                if (!purchaseResponse || !purchaseResponse.order) {
+                    const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+
+                    if (nestedError) {
+                        console.error('Đối tác trả về lỗi', nestedError);
+                        const errRaw = String(nestedError);
+                        const errStr = errRaw.toLowerCase();
+                        // Nhạy cảm: số dư, đường link, số điện thoại VN
+                        const urlRegex = /(https?:\/\/|www\.)\S+|\b[a-z0-9.-]+\.(com|net|org|io|vn|co)\b/i;
+                        const phoneRegexVN = /\b(\+?84|0)(3|5|7|8|9)\d{8}\b/;
+                        const isSensitive = errStr.includes('số dư') || errStr.includes('balance') || errStr.includes('xu') || errStr.includes('tiền')
+                            || urlRegex.test(errRaw) || phoneRegexVN.test(errRaw);
+                        if (isSensitive) {
+                            throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+                        } else {
+                            throw new Error(String(nestedError));
+                        }
+                    } else {
+                        throw new Error('Lỗi khi mua dịch vụ, vui lòng thử lại');
+                    }
+                }
+
+                purchaseOrderId = purchaseResponse.order;
+            } catch (err) {
+                providerError = err;
+            }
+        }
+
+        // Nếu provider lỗi, hoàn tiền lại cho user
+        if (providerError) {
+            console.error('❌ Provider lỗi, rollback tiền cho user:', user.username, 'số tiền:', totalCost);
+            await User.findOneAndUpdate(
+                { username: user.username },
+                { $inc: { balance: totalCost } }
+            );
+            throw providerError;
+        }
 
         // Lấy mã đơn từ Counter (tự động tăng)
         let counter = await Counter.findOne({ name: 'orderCounter' });
@@ -401,7 +429,7 @@ exports.AddOrder = async (req, res) => {
             madon: newMadon,
             hanhdong: 'Tạo đơn hàng',
             link,
-            tienhientai: newBalance + totalCost,
+            tienhientai: oldBalance,
             tongtien: totalCost,
             tienconlai: newBalance,
             createdAt,

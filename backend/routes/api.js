@@ -38,15 +38,15 @@ router.post('/cancel', authenticate.authenticateUser, refillCancelController.can
 const recaptchaLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 phút
   max: 20,              // tối đa 20 request / IP / 1 phút
-  message: { 
-    error: "Bạn gửi quá nhiều request, vui lòng thử lại sau." 
+  message: {
+    error: "Bạn gửi quá nhiều request, vui lòng thử lại sau."
   }
 });
 
 // Route lấy site key với rate-limit
 router.get('/recaptcha-site-key', recaptchaLimiter, captchaController.getSiteKey);
-router.post('/login', user.login);//ok
-router.post('/register',recaptchaLimiter, user.register);//ok
+router.post('/login', recaptchaLimiter, user.login);//ok
+router.post('/register', recaptchaLimiter, user.register);//ok
 // 2FA routes
 router.post('/2fa/setup', authenticate.authenticateUser, user.setup2FA); // Tạo secret tạm & QR
 router.post('/2fa/verify', authenticate.authenticateUser, user.verify2FA); // Xác minh & bật 2FA
@@ -119,7 +119,7 @@ const configTeleController = require('../controllers/website/configTeleControlle
 // Lấy cấu hình Telegram
 router.get('/configtele', authenticate.authenticateAdmin, configTeleController.getTelegramConfig);
 // Cập nhật cấu hình Telegram
-router.put('/configtele',authenticate.authenticateAdmin, configTeleController.updateTelegramConfig);
+router.put('/configtele', authenticate.authenticateAdmin, configTeleController.updateTelegramConfig);
 
 // Route để lấy số dư từ SMM
 // router.get('/getbalance/:id', authenticate.authenticateAdmin, SmmController.getBalance);

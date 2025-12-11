@@ -17,6 +17,9 @@ const authenticateUser = async (req, res, next) => {
         if (!user) {
             return res.status(404).json({ error: "Người dùng không tồn tại" });
         }
+        if(user.status !== "active") {
+            return res.status(404).json({ error: "Tài khoản của bạn đã bị khóa" });
+        }
         req.user = user;
         req.role = user.role;
         next();

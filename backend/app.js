@@ -66,11 +66,8 @@ app.use((req, res, next) => {
 });
 // Kết nối MongoDB
 connectDB();
-app.get('/', (req, res) => {
-    res.send('API is running...');
-});
 app.get('/api/v2', (req, res) => {
-    res.send('API V2 is running...');
+    res.send('Vui lòng sử dụng post /api/v2 để truy cập API');
 });
 // Sử dụng routes cho API
 app.use('/api', api);

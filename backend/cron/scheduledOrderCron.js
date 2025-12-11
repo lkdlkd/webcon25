@@ -187,52 +187,74 @@ async function processSingleScheduledOrder(pendingOrder) {
     const tientieu = apiRate * apiQuantity;
     const lai = totalCost - tientieu;
 
-    // Bước 1: Kiểm tra số dư từ DB (fresh data) trước khi gọi API
-    const userCheck = await User.findOne({ username: lockedOrder.username }).select('balance');
-    if (!userCheck || userCheck.balance < totalCost) {
-      throw new Error('Số dư không đủ để thực hiện giao dịch');
-    }
-
-    // Bước 2: Gọi API provider (sau khi đã chắc chắn đủ tiền)
-    let purchaseOrderId;
-
-    if (isManualOrder) {
-      purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
-    } else {
-      const smmSvConfig = await fetchSmmConfig(service.DomainSmm);
-      const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
-
-      const purchasePayload = {
-        link: lockedOrder.link,
-        quantity: apiQuantity,
-        service: service.serviceId,
-        comments: formattedComments,
-      };
-
-      const purchaseResponse = await smm.order(purchasePayload);
-      if (!purchaseResponse || !purchaseResponse.order) {
-        const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
-        throw new Error(sanitizeProviderMessage(nestedError));
-      }
-      purchaseOrderId = purchaseResponse.order;
-    }
-
-    // Bước 3: API thành công, bây giờ mới trừ tiền với atomic operation
+    // Bước 1: Trừ tiền trước khi gọi API provider (atomic để handle race condition)
     const updatedUser = await User.findOneAndUpdate(
       {
         username: lockedOrder.username,
-        balance: { $gte: totalCost } // Double-check để tránh race condition
+        balance: { $gte: totalCost }
       },
       { $inc: { balance: -totalCost } },
       { new: true }
     );
 
     if (!updatedUser) {
-      // Trường hợp hiếm: giữa lúc check và lúc trừ, user đã mua đơn khác
       throw new Error('Số dư không đủ để thực hiện giao dịch');
     }
 
-    const newBalance = updatedUser.balance;
+    const oldBalance = updatedUser.balance + totalCost; // Số dư trước khi trừ
+    const newBalance = updatedUser.balance; // Số dư sau khi trừ
+
+    // Kiểm tra số dư âm - nếu âm thì ban user và rollback
+    if (newBalance < 0) {
+      console.error('⚠️ [Scheduled] Phát hiện số dư âm:', lockedOrder.username, 'số dư:', newBalance);
+      await User.findOneAndUpdate(
+        { username: lockedOrder.username },
+        { 
+          $inc: { balance: totalCost },
+          $set: { status: 'banned' }
+        }
+      );
+      throw new Error('Tài khoản đã bị khóa do phát hiện bất thường về số dư');
+    }
+
+    // Bước 2: Gọi API provider
+    let purchaseOrderId;
+    let providerError = null;
+
+    if (isManualOrder) {
+      purchaseOrderId = `m${Math.floor(10000 + Math.random() * 90000)}`;
+    } else {
+      try {
+        const smmSvConfig = await fetchSmmConfig(service.DomainSmm);
+        const smm = new SmmApiService(smmSvConfig.url_api, smmSvConfig.api_token);
+
+        const purchasePayload = {
+          link: lockedOrder.link,
+          quantity: apiQuantity,
+          service: service.serviceId,
+          comments: formattedComments,
+        };
+
+        const purchaseResponse = await smm.order(purchasePayload);
+        if (!purchaseResponse || !purchaseResponse.order) {
+          const nestedError = purchaseResponse?.data?.error || purchaseResponse?.error || purchaseResponse?.error?.message;
+          throw new Error(sanitizeProviderMessage(nestedError));
+        }
+        purchaseOrderId = purchaseResponse.order;
+      } catch (err) {
+        providerError = err;
+      }
+    }
+
+    // Nếu provider lỗi, hoàn tiền lại cho user
+    if (providerError) {
+      console.error('❌ [Scheduled] Provider lỗi, rollback tiền cho user:', lockedOrder.username, 'số tiền:', totalCost);
+      await User.findOneAndUpdate(
+        { username: lockedOrder.username },
+        { $inc: { balance: totalCost } }
+      );
+      throw providerError;
+    }
 
     // Tạo mã đơn nội bộ
     const newMadon = await getNextOrderCode();
@@ -271,7 +293,7 @@ async function processSingleScheduledOrder(pendingOrder) {
       madon: newMadon,
       hanhdong: 'Tạo đơn hàng',
       link: lockedOrder.link,
-      tienhientai: newBalance + totalCost,
+      tienhientai: oldBalance,
       tongtien: totalCost,
       tienconlai: newBalance,
       createdAt: now,
@@ -290,7 +312,6 @@ async function processSingleScheduledOrder(pendingOrder) {
     const teleConfig = await Telegram.findOne();
     if (teleConfig && teleConfig.botToken && teleConfig.chatId) {
       const createdAtVN = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-      const oldBalance = newBalance + totalCost;
       const telegramMessage = `📌 *Đơn hàng mới đã được tạo theo lịch đặt!*\n` +
         `👤 *Khách hàng:* ${lockedOrder.username}\n` +
         `🆔 *Mã đơn:* ${newMadon}\n` +
