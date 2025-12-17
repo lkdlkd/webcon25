@@ -21,6 +21,16 @@ function getEffectiveRate(service, user) {
   }
 }
 
+// Helper: parse thutu thành số, xử lý cả string và number
+function parseThutu(thutu) {
+  if (typeof thutu === 'number') return thutu;
+  if (typeof thutu === 'string') {
+    const parsed = parseInt(thutu, 10);
+    return isNaN(parsed) ? 999999 : parsed;
+  }
+  return 999999;
+}
+
 exports.addServer = async (req, res) => {
   try {
     const user = req.user;
@@ -147,14 +157,14 @@ exports.getServer = async (req, res) => {
 
       // Sort order strictly: type.thutu -> category.thutu -> service.thutu
       services = services.sort((a, b) => {
-        const ta = a.type?.thutu ?? 999999;
-        const tb = b.type?.thutu ?? 999999;
+        const ta = parseThutu(a.type?.thutu);
+        const tb = parseThutu(b.type?.thutu);
         if (ta !== tb) return ta - tb;
-        const cta = a.category?.thutu ?? 999999;
-        const ctb = b.category?.thutu ?? 999999;
+        const cta = parseThutu(a.category?.thutu);
+        const ctb = parseThutu(b.category?.thutu);
         if (cta !== ctb) return cta - ctb;
-        const sta = typeof a.thutu === 'number' ? a.thutu : 999999;
-        const stb = typeof b.thutu === 'number' ? b.thutu : 999999;
+        const sta = parseThutu(a.thutu);
+        const stb = parseThutu(b.thutu);
         return sta - stb;
       });
 
@@ -229,14 +239,14 @@ exports.getServer = async (req, res) => {
       services = services.filter(s => s.category && s.type);
 
       services = services.sort((a, b) => {
-        const ta = a.type?.thutu ?? 999999;
-        const tb = b.type?.thutu ?? 999999;
+        const ta = parseThutu(a.type?.thutu);
+        const tb = parseThutu(b.type?.thutu);
         if (ta !== tb) return ta - tb;
-        const cta = a.category?.thutu ?? 999999;
-        const ctb = b.category?.thutu ?? 999999;
+        const cta = parseThutu(a.category?.thutu);
+        const ctb = parseThutu(b.category?.thutu);
         if (cta !== ctb) return cta - ctb;
-        const sta = typeof a.thutu === 'number' ? a.thutu : 999999;
-        const stb = typeof b.thutu === 'number' ? b.thutu : 999999;
+        const sta = parseThutu(a.thutu);
+        const stb = parseThutu(b.thutu);
         return sta - stb;
       });
 
@@ -355,8 +365,8 @@ exports.getServerByTypeAndPath = async (req, res) => {
     // Thêm thông tin server vào từng dịch vụ
     // Sắp xếp theo thutu tăng dần
     services = services.sort((a, b) => {
-      const sa = typeof a.thutu === 'number' ? a.thutu : 999999;
-      const sb = typeof b.thutu === 'number' ? b.thutu : 999999;
+      const sa = parseThutu(a.thutu);
+      const sb = parseThutu(b.thutu);
       return sa - sb;
     });
 
