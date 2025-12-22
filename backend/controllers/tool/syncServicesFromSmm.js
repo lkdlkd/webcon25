@@ -205,6 +205,20 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
         // Kiểm tra xem có thay đổi gì không
         let hasChanges = false;
 
+        // Kiểm tra và cập nhật Platform nếu thay đổi
+        if (service.type.toString() !== platformId.toString()) {
+            console.log(`🔄 Platform thay đổi cho ${service.name}: ${service.type} -> ${platformId}`);
+            service.type = platformId;
+            hasChanges = true;
+        }
+
+        // Kiểm tra và cập nhật Category nếu thay đổi
+        if (service.category.toString() !== categoryId.toString()) {
+            console.log(`🔄 Category thay đổi cho ${service.name}: ${service.category} -> ${categoryId}`);
+            service.category = categoryId;
+            hasChanges = true;
+        }
+
         // Chuẩn bị dữ liệu mới
         const newData = {
             serviceName: serviceData.name,
