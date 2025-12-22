@@ -228,6 +228,7 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
             getid: (serviceData.getid === true || serviceData.getid === "on") ? "on" : "off",
             comment: (serviceData.comment === true || serviceData.comment === "on") ? "on" : "off",
             description: serviceData.description || "",
+            maychu: serviceData.maychu || "",            
             min: serviceData.min,
             max: serviceData.max,
             cancel: serviceData.cancel ? "on" : "off",
