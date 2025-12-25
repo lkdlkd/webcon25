@@ -41,7 +41,7 @@ export default function Landing() {
                 setConfig(configData.data);
                 setSiteKey(recaptchaData.siteKey);
             } catch (err) {
-                console.error('Error fetching initial data:', err);
+                // console.error('Error fetching initial data:', err);
             } finally {
                 setSiteKeyLoading(false);
             }
