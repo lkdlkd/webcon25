@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { login, register, getRecaptchaSiteKey } from '@/Utils/api';
 import { AuthContext } from '@/Context/AuthContext';
 import ReCAPTCHA from "react-google-recaptcha";
-
+import { getConfigWebLogo } from '@/Utils/api';
 export default function Landing() {
     const [authMode, setAuthMode] = useState('login');
     const API_DOMAIN = window.location.origin;
@@ -27,7 +27,28 @@ export default function Landing() {
     const recaptchaRef = useRef(null);
     const navigate = useNavigate();
     const { updateAuth } = useContext(AuthContext);
-
+    const [config, setConfig] = useState(null);
+    
+    // Fetch config and recaptcha site key only once
+    useEffect(() => {
+        const fetchInitialData = async () => {
+            try {
+                setSiteKeyLoading(true);
+                const [configData, recaptchaData] = await Promise.all([
+                    getConfigWebLogo(),
+                    getRecaptchaSiteKey()
+                ]);
+                setConfig(configData.data);
+                setSiteKey(recaptchaData.siteKey);
+            } catch (err) {
+                console.error('Error fetching initial data:', err);
+            } finally {
+                setSiteKeyLoading(false);
+            }
+        };
+        fetchInitialData();
+    }, []);
+    
     // Mouse tracking for glow effect
     useEffect(() => {
         const handleMouseMove = (e) => {
@@ -59,8 +80,6 @@ export default function Landing() {
         try { const data = await register({ username: formData.username, password: formData.password, recaptchaToken }); setSuccess(data.message || 'Đăng ký thành công!'); setTimeout(() => { setAuthMode('login'); resetForm(); }, 1500); }
         catch (err) { setError(err.message || 'Có lỗi xảy ra.'); setRecaptchaToken(''); if (recaptchaRef.current) recaptchaRef.current.reset(); } finally { setLoading(false); }
     };
-
-    useEffect(() => { const fetchSiteKey = async () => { try { setSiteKeyLoading(true); const data = await getRecaptchaSiteKey(); setSiteKey(data.siteKey); } catch (err) { } finally { setSiteKeyLoading(false); } }; fetchSiteKey(); }, []);
 
     const stats = [
         { value: '44K+', label: 'Đơn Hoàn Thành' },
@@ -505,6 +524,10 @@ export default function Landing() {
                         padding-bottom: 20px;
                         width: 100%;
                     }
+                    .logo{
+                        margin: 0 auto !important;
+                        height: 60px !important;
+                    }
                     .api-sidebar .tab-btn { 
                         white-space: normal !important; 
                         padding: 12px 16px !important; 
@@ -629,8 +652,14 @@ export default function Landing() {
             <header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, padding: '16px 0', background: 'rgba(10,10,10,0.95)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => { setActiveSection('home'); setMobileMenuOpen(false); }}>
-                        <span style={{ fontSize: '28px' }}>⚡</span>
-                        <span style={{ fontWeight: 700, fontSize: '20px', color: '#ffffff' }}>{Domain || 'SMMPANEL'}</span>
+                        {config?.logo ? (
+                            <img src={config.logo} className="logo" alt="Logo" style={{ height: '70px' ,width: 'auto', objectFit: 'contain' }} />
+                        ) : (
+                            <>
+                                <span style={{ fontSize: '28px' }}>⚡</span>
+                                <span style={{ fontWeight: 700, fontSize: '20px', color: '#ffffff' }}>{Domain}</span>
+                            </>
+                        )}
                     </div>
 
                     {/* Desktop Nav */}
@@ -877,7 +906,7 @@ export default function Landing() {
                                     {testimonials.map((t, i) => (
                                         <div key={i} className="testimonial-card">
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-                                                <img style={{ width: '56px', height: '56px',borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px'  }} src={t.img} alt="" />
+                                                <img style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }} src={t.img} alt="" />
                                                 {/* <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, rgba(255, 68, 68, 0.4), rgba(100, 100, 255, 0.3))', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }}>img</div> */}
                                                 <div>
                                                     <div style={{ fontWeight: 700, fontSize: '17px', color: '#ffffff' }}>{t.name}</div>

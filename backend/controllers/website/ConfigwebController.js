@@ -71,6 +71,53 @@ exports.getConfigweb = async (req, res) => {
   }
 };
 
+// Lấy thông tin cấu hình website
+exports.getConfigwebLogo = async (req, res) => {
+  try {
+    let config = await Configweb.findOne();
+
+    // Nếu chưa có cấu hình, tạo một cấu hình mặc định
+    if (!config) {
+      config = new Configweb({
+        tieude: "",
+        logo: "",
+        favicon: "",
+        linktele: "",
+        title: "",
+        daily: 1000000,
+        distributor: 10000000,
+        viewluotban: false,
+        autoactive: false,
+        autoremove: false,
+        deleteOrders: false,
+        deleteUsers: false,
+        deleteHistory: false,
+        autoDeleteMonths: 3,
+        headerJs: "",
+        footerJs: "",
+        lienhe: [
+          {
+            type: "",
+            value: "",
+            logolienhe: "",
+          },
+        ],
+        cuphap: "naptien", // Thêm giá trị mặc định cho cuphap
+      });
+      await config.save();
+    }
+
+    // Chuẩn bị dữ liệu trả về
+    const responseData = {
+      logo: config.logo,
+    };
+
+    res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    console.error("Lỗi khi lấy cấu hình website:", error);
+    res.status(500).json({ success: false, message: "Lỗi server", error: error.message });
+  }
+};
 // Cập nhật cấu hình website
 exports.updateConfigweb = async (req, res) => {
   try {

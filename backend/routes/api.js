@@ -111,6 +111,7 @@ router.post("/getUid", toolController.getUid);
 // Config web routes
 router.get("/configweb", authenticate.authenticateUser, configwebController.getConfigweb); // Lấy cấu hình website
 router.put("/configweb", authenticate.authenticateAdmin, configwebController.updateConfigweb); // Cập nhật cấu hình website
+router.get("/configweblogo",recaptchaLimiter, configwebController.getConfigwebLogo); // Lấy logo website
 // Config card routes
 router.get("/config-card", authenticate.authenticateAdmin, configCardController.getConfigCard); // Lấy cấu hình thẻ nạp
 router.put("/config-card", authenticate.authenticateAdmin, configCardController.updateConfigCard); // Cập nhật cấu hình thẻ nạp
