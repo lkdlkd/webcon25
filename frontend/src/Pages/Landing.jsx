@@ -76,9 +76,9 @@ export default function Landing() {
     ];
 
     const testimonials = [
-        { name: 'Quỳnh Aka', role: 'Nữ TikToker', text: 'Dịch vụ rất uy tín, giúp mình duy trì tương tác và tăng view đều mỗi ngày.' },
-        { name: 'Sơn Tùng MTP', role: 'Ca Sĩ', text: 'Dịch vụ tăng tương tác thật sự tuyệt vời. Fanpage của tôi tăng hơn 300% lượt tương tác chỉ sau 2 tuần.' },
-        { name: 'Tun Phạm', role: 'Content Creator', text: 'Từ khi dùng dịch vụ, kênh TikTok của mình tăng follow tự nhiên và lượng tương tác tốt hơn hẳn.' },
+        { name: 'Quỳnh Aka', role: 'Nữ TikToker', text: 'Dịch vụ rất uy tín, giúp mình duy trì tương tác và tăng view đều mỗi ngày.', img: '/img/Quynhaka.png' },
+        { name: 'Sơn Tùng MTP', role: 'Ca Sĩ', text: 'Dịch vụ tăng tương tác thật sự tuyệt vời. Fanpage của tôi tăng hơn 300% lượt tương tác chỉ sau 2 tuần.', img: '/img/sontung.png' },
+        { name: 'Tun Phạm', role: 'Content Creator', text: 'Từ khi dùng dịch vụ, kênh TikTok của mình tăng follow tự nhiên và lượng tương tác tốt hơn hẳn.', img: '/img/TunPham.png' },
     ];
 
     const faqs = [
@@ -877,7 +877,8 @@ export default function Landing() {
                                     {testimonials.map((t, i) => (
                                         <div key={i} className="testimonial-card">
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-                                                <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, rgba(255, 68, 68, 0.4), rgba(100, 100, 255, 0.3))', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }}>👤</div>
+                                                <img style={{ width: '56px', height: '56px',borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px'  }} src={t.img} alt="" />
+                                                {/* <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, rgba(255, 68, 68, 0.4), rgba(100, 100, 255, 0.3))', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }}>img</div> */}
                                                 <div>
                                                     <div style={{ fontWeight: 700, fontSize: '17px', color: '#ffffff' }}>{t.name}</div>
                                                     <div style={{ fontSize: '14px', color: '#808080' }}>{t.role}</div>
