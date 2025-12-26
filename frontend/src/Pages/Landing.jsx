@@ -1,9 +1,136 @@
-import React, { useEffect, useState, useContext, useRef } from 'react';
+import React, { useEffect, useState, useContext, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, register, getRecaptchaSiteKey } from '@/Utils/api';
 import { AuthContext } from '@/Context/AuthContext';
 import ReCAPTCHA from "react-google-recaptcha";
 import { getConfigWebLogo } from '@/Utils/api';
+
+// Custom hook for scroll reveal animation
+const useScrollReveal = (options = {}) => {
+    const [isVisible, setIsVisible] = useState(false);
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(([entry]) => {
+            if (entry.isIntersecting) {
+                setIsVisible(true);
+                observer.unobserve(entry.target);
+            }
+        }, { threshold: options.threshold || 0.1, rootMargin: options.rootMargin || '0px' });
+
+        if (ref.current) observer.observe(ref.current);
+        return () => observer.disconnect();
+    }, [options.threshold, options.rootMargin]);
+
+    return [ref, isVisible];
+};
+
+// Custom hook for count-up animation
+const useCountUp = (endValue, duration = 2000, isVisible = true) => {
+    const [count, setCount] = useState(0);
+    const countRef = useRef(null);
+    const hasAnimated = useRef(false);
+
+    useEffect(() => {
+        if (!isVisible || hasAnimated.current) return;
+        hasAnimated.current = true;
+
+        // Parse the end value (handle formats like "44K+", "5K+", "300%", "35M+")
+        let numericValue = 0;
+        let suffix = '';
+        const match = String(endValue).match(/^([\d.]+)([KMk%+]*)/);
+        if (match) {
+            numericValue = parseFloat(match[1]);
+            suffix = match[2] || '';
+        }
+
+        const startTime = performance.now();
+        const animate = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            // Easing function for smooth animation
+            const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+            const currentValue = numericValue * easeOutQuart;
+
+            setCount(currentValue);
+
+            if (progress < 1) {
+                countRef.current = requestAnimationFrame(animate);
+            }
+        };
+        countRef.current = requestAnimationFrame(animate);
+
+        return () => {
+            if (countRef.current) cancelAnimationFrame(countRef.current);
+        };
+    }, [endValue, duration, isVisible]);
+
+    // Format the count value
+    const formatValue = (val) => {
+        const match = String(endValue).match(/^([\d.]+)([KMk%+]*)/);
+        const suffix = match ? match[2] : '';
+        const numericEnd = match ? parseFloat(match[1]) : 0;
+
+        if (suffix.includes('K') || suffix.includes('k')) {
+            return Math.floor(val) + 'K+';
+        } else if (suffix.includes('M')) {
+            return Math.floor(val) + 'M+';
+        } else if (suffix.includes('%')) {
+            return Math.floor(val) + '%';
+        }
+        return Math.floor(val) + (suffix || '');
+    };
+
+    return formatValue(count);
+};
+
+// Animated Count Component
+const AnimatedCount = ({ value, duration = 2000 }) => {
+    const [ref, isVisible] = useScrollReveal({ threshold: 0.3 });
+    const animatedValue = useCountUp(value, duration, isVisible);
+
+    return (
+        <span ref={ref} className="gradient-text rainbow-text" style={{ fontSize: '48px', fontWeight: 800, marginBottom: '12px', display: 'inline-block' }}>
+            {animatedValue}
+        </span>
+    );
+};
+
+// Rainbow Text Component
+const RainbowText = ({ children, style = {} }) => {
+    return (
+        <span className="rainbow-text" style={style}>
+            {children}
+        </span>
+    );
+};
+
+// Scroll Reveal Wrapper Component
+const ScrollReveal = ({ children, delay = 0, direction = 'up' }) => {
+    const [ref, isVisible] = useScrollReveal({ threshold: 0.1 });
+
+    const getTransform = () => {
+        switch (direction) {
+            case 'left': return 'translateX(-50px)';
+            case 'right': return 'translateX(50px)';
+            case 'down': return 'translateY(-50px)';
+            default: return 'translateY(50px)';
+        }
+    };
+
+    return (
+        <div
+            ref={ref}
+            style={{
+                opacity: isVisible ? 1 : 0,
+                transform: isVisible ? 'translate(0)' : getTransform(),
+                transition: `all 0.8s cubic-bezier(0.4, 0, 0.2, 1) ${delay}s`,
+            }}
+        >
+            {children}
+        </div>
+    );
+};
 export default function Landing() {
     const [authMode, setAuthMode] = useState('login');
     const API_DOMAIN = window.location.origin;
@@ -28,7 +155,7 @@ export default function Landing() {
     const navigate = useNavigate();
     const { updateAuth } = useContext(AuthContext);
     const [config, setConfig] = useState(null);
-    
+
     // Fetch config and recaptcha site key only once
     useEffect(() => {
         const fetchInitialData = async () => {
@@ -48,7 +175,7 @@ export default function Landing() {
         };
         fetchInitialData();
     }, []);
-    
+
     // Mouse tracking for glow effect
     useEffect(() => {
         const handleMouseMove = (e) => {
@@ -193,6 +320,67 @@ export default function Landing() {
                 @keyframes gradientShift {
                     0%, 100% { background-position: 0% 50%; }
                     50% { background-position: 100% 50%; }
+                }
+                
+                /* Rainbow Text Animation - Color Cycling Effect */
+                .rainbow-text {
+                    background: linear-gradient(
+                        90deg,
+                        #ff0000,
+                        #ff4500 ,
+                        #ff8c00 ,
+                        #ff1493 ,
+                        #ff0000 ,
+                        #ff4500 
+                    );
+                    background-size: 300% 100%;
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    animation: rainbowFlow 6s ease-in-out infinite;
+                }
+                @keyframes rainbowFlow {
+                    0% { background-position: 0% 50%; }
+                    100% { background-position: 300% 50%; }
+                }
+                
+                /* Scroll Reveal Animation */
+                .scroll-reveal {
+                    opacity: 0;
+                    transform: translateY(50px);
+                    transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+                .scroll-reveal.visible {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+                .scroll-reveal-left {
+                    opacity: 0;
+                    transform: translateX(-50px);
+                    transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+                .scroll-reveal-left.visible {
+                    opacity: 1;
+                    transform: translateX(0);
+                }
+                .scroll-reveal-right {
+                    opacity: 0;
+                    transform: translateX(50px);
+                    transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+                .scroll-reveal-right.visible {
+                    opacity: 1;
+                    transform: translateX(0);
+                }
+                
+                /* Count Up Number Animation */
+                .count-up {
+                    display: inline-block;
+                    transition: all 0.3s ease;
+                }
+                .count-up:hover {
+                    transform: scale(1.1);
+                    text-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
                 }
                 
                 /* Glass Card with Shine Effect */
@@ -653,7 +841,7 @@ export default function Landing() {
                 <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} onClick={() => { setActiveSection('home'); setMobileMenuOpen(false); }}>
                         {config?.logo ? (
-                            <img src={config.logo} className="logo" alt="Logo" style={{ height: '70px' ,width: 'auto', objectFit: 'contain' }} />
+                            <img src={config.logo} className="logo" alt="Logo" style={{ height: '70px', width: 'auto', objectFit: 'contain' }} />
                         ) : (
                             <>
                                 <span style={{ fontSize: '28px' }}>⚡</span>
@@ -702,7 +890,7 @@ export default function Landing() {
                                             Hệ Thống Dịch Vụ Mạng Xã Hội Hàng Đầu Việt Nam
                                         </h1>
                                         <h2 style={{ fontSize: 'clamp(22px, 3vw, 36px)', fontWeight: 700, marginBottom: '24px', textAlign: 'left' }}>
-                                            <span className="gradient-text">SMMPANEL - Social Media Marketing</span>
+                                            <span className="rainbow-text">SMMPANEL - Social Media Marketing</span>
                                         </h2>
                                         <p style={{ fontSize: '17px', color: '#b0b0b0', lineHeight: 1.8, marginBottom: '32px', textAlign: 'left' }}>
                                             <strong style={{ color: '#ffffff' }}>{Domain || 'SMMPANEL'}</strong> là nhà cung cấp dịch vụ Facebook & TikTok & Instagram hàng đầu tại Việt Nam!! Cùng rất nhiều dịch vụ nền tảng khác giá tốt.
@@ -837,19 +1025,23 @@ export default function Landing() {
                         {/* About / Stats Section */}
                         <section style={{ padding: '10px 24px', background: 'linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 100%)' }}>
                             <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                                <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-                                    <div className="badge" style={{ marginBottom: '20px' }}>✦ Về Chúng Tôi ✦</div>
-                                    <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, lineHeight: 1.4, color: '#ffffff' }}>
-                                        Giải pháp tăng tương tác mạng xã hội <span className="gradient-text">nhanh, an toàn và hiệu quả</span>
-                                        <br />cho Facebook, TikTok, Instagram và YouTube
-                                    </h2>
-                                </div>
+                                <ScrollReveal>
+                                    <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+                                        <div className="badge" style={{ marginBottom: '20px' }}>✦ Về Chúng Tôi ✦</div>
+                                        <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, lineHeight: 1.4, color: '#ffffff' }}>
+                                            Giải pháp tăng tương tác mạng xã hội <span className="rainbow-text">nhanh, an toàn và hiệu quả</span>
+                                            <br />cho Facebook, TikTok, Instagram và YouTube
+                                        </h2>
+                                    </div>
+                                </ScrollReveal>
                                 <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '28px' }}>
                                     {stats.map((stat, i) => (
-                                        <div key={i} className="stat-card" style={{ padding: '40px 24px', textAlign: 'center' }}>
-                                            <div className="gradient-text" style={{ fontSize: '48px', fontWeight: 800, marginBottom: '12px' }}>{stat.value}</div>
-                                            <div style={{ color: '#b0b0b0', fontSize: '15px', fontWeight: 500 }}>{stat.label}</div>
-                                        </div>
+                                        <ScrollReveal key={i} delay={i * 0.1}>
+                                            <div className="stat-card" style={{ padding: '40px 24px', textAlign: 'center' }}>
+                                                <AnimatedCount value={stat.value} duration={2000} />
+                                                <div style={{ color: '#b0b0b0', fontSize: '15px', fontWeight: 500 }}>{stat.label}</div>
+                                            </div>
+                                        </ScrollReveal>
                                     ))}
                                 </div>
                             </div>
@@ -858,21 +1050,25 @@ export default function Landing() {
                         {/* Features Section */}
                         <section style={{ padding: '100px 24px' }}>
                             <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                                <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-                                    <div className="badge" style={{ marginBottom: '20px' }}>✦ Hiệu Quả Thực Tế ✦</div>
-                                    <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
-                                        Mang lại <span className="gradient-text">kết quả rõ ràng</span> giúp tăng trưởng mạnh mẽ
-                                    </h2>
-                                    <p style={{ fontSize: '18px', color: '#b0b0b0' }}>
-                                        Tăng tương tác người dùng trên Facebook – TikTok – Instagram.
-                                    </p>
-                                </div>
+                                <ScrollReveal>
+                                    <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+                                        <div className="badge" style={{ marginBottom: '20px' }}>✦ Hiệu Quả Thực Tế ✦</div>
+                                        <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
+                                            Mang lại <span className="rainbow-text">kết quả rõ ràng</span> giúp tăng trưởng mạnh mẽ
+                                        </h2>
+                                        <p style={{ fontSize: '18px', color: '#b0b0b0' }}>
+                                            Tăng tương tác người dùng trên Facebook – TikTok – Instagram.
+                                        </p>
+                                    </div>
+                                </ScrollReveal>
                                 <div className="features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '28px' }}>
                                     {features.map((f, i) => (
-                                        <div key={i} className="glass-card" style={{ padding: '36px' }}>
-                                            <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, #ff4444, #ff6b6b)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', fontSize: '26px', color: 'white' }}>✓</div>
-                                            <p style={{ color: '#c0c0c0', fontSize: '16px', lineHeight: 1.9 }}>{f.text}</p>
-                                        </div>
+                                        <ScrollReveal key={i} delay={i * 0.15}>
+                                            <div className="glass-card" style={{ padding: '36px' }}>
+                                                <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, #ff4444, #ff6b6b)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', fontSize: '26px', color: 'white' }}>✓</div>
+                                                <p style={{ color: '#c0c0c0', fontSize: '16px', lineHeight: 1.9 }}>{f.text}</p>
+                                            </div>
+                                        </ScrollReveal>
                                     ))}
                                 </div>
                             </div>
@@ -881,40 +1077,45 @@ export default function Landing() {
                         {/* Testimonials Section */}
                         <section style={{ padding: '100px 24px', background: 'linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 100%)' }}>
                             <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-                                <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-                                    <div className="badge" style={{ marginBottom: '20px' }}>✦ Khách hàng nói gì? ✦</div>
-                                    <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
-                                        Hơn <span className="gradient-text">5.000+ creator & doanh nghiệp</span> tin tưởng dịch vụ Tăng Tương Tác
-                                    </h2>
-                                    <p style={{ fontSize: '17px', color: '#a0a0a0', maxWidth: '750px', margin: '0 auto' }}>
-                                        Chúng tôi giúp bạn tăng tương tác thật, tối ưu thuật toán và mở rộng độ phủ thương hiệu trên Facebook, TikTok, Instagram và YouTube.
-                                    </p>
-                                </div>
+                                <ScrollReveal>
+                                    <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+                                        <div className="badge" style={{ marginBottom: '20px' }}>✦ Khách hàng nói gì? ✦</div>
+                                        <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
+                                            Hơn <span className="rainbow-text">5.000+ creator & doanh nghiệp</span> tin tưởng dịch vụ Tăng Tương Tác
+                                        </h2>
+                                        <p style={{ fontSize: '17px', color: '#a0a0a0', maxWidth: '750px', margin: '0 auto' }}>
+                                            Chúng tôi giúp bạn tăng tương tác thật, tối ưu thuật toán và mở rộng độ phủ thương hiệu trên Facebook, TikTok, Instagram và YouTube.
+                                        </p>
+                                    </div>
+                                </ScrollReveal>
 
-                                <div style={{ display: 'flex', gap: '60px', justifyContent: 'center', marginBottom: '60px', flexWrap: 'wrap' }}>
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div className="gradient-text" style={{ fontSize: '56px', fontWeight: 800 }}>5k+</div>
-                                        <div style={{ color: '#a0a0a0', fontSize: '16px', fontWeight: 500 }}>Khách hàng hài lòng</div>
+                                <ScrollReveal delay={0.2}>
+                                    <div style={{ display: 'flex', gap: '60px', justifyContent: 'center', marginBottom: '60px', flexWrap: 'wrap' }}>
+                                        <div style={{ textAlign: 'center' }}>
+                                            <AnimatedCount value="5k+" duration={2000} />
+                                            <div style={{ color: '#a0a0a0', fontSize: '16px', fontWeight: 500 }}>Khách hàng hài lòng</div>
+                                        </div>
+                                        <div style={{ textAlign: 'center' }}>
+                                            <AnimatedCount value="35M+" duration={2500} />
+                                            <div style={{ color: '#a0a0a0', fontSize: '16px', fontWeight: 500 }}>Lượt tương tác đã tạo ra</div>
+                                        </div>
                                     </div>
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div className="gradient-text" style={{ fontSize: '56px', fontWeight: 800 }}>35M+</div>
-                                        <div style={{ color: '#a0a0a0', fontSize: '16px', fontWeight: 500 }}>Lượt tương tác đã tạo ra</div>
-                                    </div>
-                                </div>
+                                </ScrollReveal>
 
                                 <div className="testimonials-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '28px' }}>
                                     {testimonials.map((t, i) => (
-                                        <div key={i} className="testimonial-card">
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
-                                                <img style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }} src={t.img} alt="" />
-                                                {/* <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, rgba(255, 68, 68, 0.4), rgba(100, 100, 255, 0.3))', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }}>img</div> */}
-                                                <div>
-                                                    <div style={{ fontWeight: 700, fontSize: '17px', color: '#ffffff' }}>{t.name}</div>
-                                                    <div style={{ fontSize: '14px', color: '#808080' }}>{t.role}</div>
+                                        <ScrollReveal key={i} delay={i * 0.15}>
+                                            <div className="testimonial-card">
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
+                                                    <img style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px' }} src={t.img} alt="" />
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: '17px', color: '#ffffff' }}>{t.name}</div>
+                                                        <div style={{ fontSize: '14px', color: '#808080' }}>{t.role}</div>
+                                                    </div>
                                                 </div>
+                                                <p style={{ color: '#c0c0c0', lineHeight: 1.8, fontSize: '15px' }}>"{t.text}"</p>
                                             </div>
-                                            <p style={{ color: '#c0c0c0', lineHeight: 1.8, fontSize: '15px' }}>"{t.text}"</p>
-                                        </div>
+                                        </ScrollReveal>
                                     ))}
                                 </div>
                             </div>
@@ -923,21 +1124,25 @@ export default function Landing() {
                         {/* FAQ Section */}
                         <section style={{ padding: '100px 24px' }}>
                             <div style={{ maxWidth: '850px', margin: '0 auto' }}>
-                                <div style={{ textAlign: 'center', marginBottom: '60px' }}>
-                                    <div className="badge" style={{ marginBottom: '20px' }}>✦ Câu hỏi thường gặp ✦</div>
-                                    <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
-                                        Giải đáp thắc mắc về dịch vụ <span className="gradient-text">tăng tương tác mạng xã hội</span>
-                                    </h2>
-                                    <button onClick={() => navigate('/home')} className="btn-primary" style={{ marginTop: '20px' }}>Truy Cập Ngay</button>
-                                </div>
-                                {faqs.map((faq, i) => (
-                                    <div key={i} className={`faq-item ${activeFaq === i ? 'active' : ''}`}>
-                                        <div className="faq-q" onClick={() => setActiveFaq(activeFaq === i ? null : i)}>
-                                            <span>{faq.q}</span>
-                                            <span style={{ color: '#ff4444', fontSize: '24px', fontWeight: 700 }}>{activeFaq === i ? '−' : '+'}</span>
-                                        </div>
-                                        {activeFaq === i && <div className="faq-a">{faq.a}</div>}
+                                <ScrollReveal>
+                                    <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+                                        <div className="badge" style={{ marginBottom: '20px' }}>✦ Câu hỏi thường gặp ✦</div>
+                                        <h2 style={{ fontSize: 'clamp(24px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
+                                            Giải đáp thắc mắc về dịch vụ <span className="rainbow-text">tăng tương tác mạng xã hội</span>
+                                        </h2>
+                                        <button onClick={() => navigate('/home')} className="btn-primary" style={{ marginTop: '20px' }}>Truy Cập Ngay</button>
                                     </div>
+                                </ScrollReveal>
+                                {faqs.map((faq, i) => (
+                                    <ScrollReveal key={i} delay={i * 0.1}>
+                                        <div className={`faq-item ${activeFaq === i ? 'active' : ''}`}>
+                                            <div className="faq-q" onClick={() => setActiveFaq(activeFaq === i ? null : i)}>
+                                                <span>{faq.q}</span>
+                                                <span style={{ color: '#ff4444', fontSize: '24px', fontWeight: 700 }}>{activeFaq === i ? '−' : '+'}</span>
+                                            </div>
+                                            {activeFaq === i && <div className="faq-a">{faq.a}</div>}
+                                        </div>
+                                    </ScrollReveal>
                                 ))}
                             </div>
                         </section>
@@ -945,11 +1150,15 @@ export default function Landing() {
                         {/* CTA Section */}
                         <section style={{ padding: '100px 24px' }}>
                             <div style={{ maxWidth: '850px', margin: '0 auto' }}>
-                                <div className="glass-card" style={{ padding: '64px 48px', textAlign: 'center', background: 'linear-gradient(145deg, rgba(255, 68, 68, 0.08) 0%, rgba(100, 100, 255, 0.05) 100%)' }}>
-                                    <h2 style={{ fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>Sẵn sàng tăng trưởng ngay hôm nay?</h2>
-                                    <p style={{ color: '#a0a0a0', marginBottom: '36px', fontSize: '18px', lineHeight: 1.7 }}>Tạo tài khoản miễn phí, thêm số dư sau – bắt đầu trong 60 giây.</p>
-                                    <button onClick={() => navigate('/dang-ky')} className="btn-primary" style={{ fontSize: '17px', padding: '20px 56px' }}>🚀 Tạo Tài Khoản Ngay</button>
-                                </div>
+                                <ScrollReveal>
+                                    <div className="glass-card" style={{ padding: '64px 48px', textAlign: 'center', background: 'linear-gradient(145deg, rgba(255, 68, 68, 0.08) 0%, rgba(100, 100, 255, 0.05) 100%)' }}>
+                                        <h2 style={{ fontSize: 'clamp(26px, 4vw, 40px)', fontWeight: 700, marginBottom: '20px', color: '#ffffff' }}>
+                                            <span className="rainbow-text">Sẵn sàng tăng trưởng ngay hôm nay?</span>
+                                        </h2>
+                                        <p style={{ color: '#a0a0a0', marginBottom: '36px', fontSize: '18px', lineHeight: 1.7 }}>Tạo tài khoản miễn phí, thêm số dư sau – bắt đầu trong 60 giây.</p>
+                                        <button onClick={() => navigate('/dang-ky')} className="btn-primary" style={{ fontSize: '17px', padding: '20px 56px' }}>🚀 Tạo Tài Khoản Ngay</button>
+                                    </div>
+                                </ScrollReveal>
                             </div>
                         </section>
                     </div>
