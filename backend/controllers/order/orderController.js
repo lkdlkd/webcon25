@@ -8,6 +8,7 @@ const Telegram = require('../../models/Telegram');
 const Counter = require('../../models/Counter');
 const Scheduled = require('../../models/Scheduled');
 const User = require('../../models/User');
+const { emitOrderSuccess } = require('../../utils/socket');
 // Helper: lấy đơn giá theo cấp bậc user (member/vip)
 function getEffectiveRate(service, user) {
   try {
@@ -460,6 +461,13 @@ async function addOrder(req, res) {
 
     await orderData.save();
     await HistoryData.save();
+
+    // Emit Socket.IO event cho realtime notification
+    emitOrderSuccess(username, {
+      username,
+      newBalance,
+      timestamp: new Date(),
+    });
 
     // Gửi thông báo Telegram nếu có cấu hình
     const teleConfig = await Telegram.findOne();

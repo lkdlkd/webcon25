@@ -8,6 +8,7 @@ const cardModel = require("../../models/Card");
 const ConfigCard = require("../../models/ConfigCard"); // Import mô hình ConfigCard
 const Telegram = require('../../models/Telegram');
 const Configweb = require('../../models/Configweb');
+const { emitDepositSuccess } = require('../../utils/socket');
 
 /**
  * Controller cập nhật trạng thái thẻ cào
@@ -143,6 +144,12 @@ exports.rechargeCardStatus = async () => {
                             tienconlai: updatedUser.balance,
                             mota: note,
                         });
+                        emitDepositSuccess(userData.username, {
+                            username : userData.username,
+                            newBalance: updatedUser.balance,
+                            message: `Nạp tiền thành công ${Number(Math.floor(Number(chietkhau))).toLocaleString("en-US")} VNĐ từ thẻ cào`,
+                            timestamp: new Date(),
+                        });
                         // Gửi thông báo Telegram nếu có cấu hình
                         const teleConfig = await Telegram.findOne();
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
@@ -257,7 +264,12 @@ exports.rechargeCardStatus = async () => {
                             tienconlai: updatedUser.balance,
                             mota: note,
                         });
-
+                        emitDepositSuccess(userData.username, {
+                            username : userData.username,
+                            newBalance: updatedUser.balance,
+                            message: `Nạp tiền thành công ${Number(Math.floor(Number(chietkhau2))).toLocaleString("en-US")} VNĐ từ thẻ cào (sai mệnh giá)`,
+                            timestamp: new Date(),
+                        });
                         // Gửi thông báo Telegram nếu có cấu hình
                         const teleConfig = await Telegram.findOne();
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)

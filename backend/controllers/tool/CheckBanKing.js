@@ -6,6 +6,7 @@ const User = require('../../models/User');
 const Promotion = require('../../models/Promotion');
 const HistoryUser = require('../../models/History');
 const Telegram = require('../../models/Telegram');
+const { emitDepositSuccess } = require('../../utils/socket');
 
 // Biến chống chồng lệnh cron
 let isRunning = false;
@@ -252,6 +253,16 @@ cron.schedule('*/15 * * * * *', async () => {
                                 : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`,
                         });
                         await historyData.save();
+
+                        // Emit Socket.IO event cho realtime notification
+                        emitDepositSuccess(username, {
+                            username,
+                            newBalance,
+                            message: bonus > 0
+                                ? `Nạp tiền thành công ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ + ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ khuyến mãi`
+                                : `Nạp tiền thành công ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ`,
+                            timestamp: new Date(),
+                        });
 
                         // Thông báo Telegram
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
