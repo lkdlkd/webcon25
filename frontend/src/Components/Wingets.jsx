@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
+import ChatWidget from "./ChatWidget";
 
 // Floating contacts widget: renders a Bitrix-style button with expandable social links
 // Props: { configWeb?: { lienhe?: Array<{ type?: string; value: string; label?: string; logolienhe?: string }> } }
-const Wingets = ({ configWeb }) => {
+const Wingets = ({ configWeb, username }) => {
     const lienhe = Array.isArray(configWeb?.lienhe) ? configWeb.lienhe : [];
     const [open, setOpen] = useState(false);
+    const [chatOpen, setChatOpen] = useState(false);
     const items = useMemo(() => lienhe, [lienhe]);
 
     // Contacts that have a logo available
@@ -32,12 +34,19 @@ const Wingets = ({ configWeb }) => {
         setOpen(false);
     };
 
+    const handleSupportClick = () => {
+        setChatOpen(true);
+    };
+
     if (!logoContacts || logoContacts.length === 0) return null;
 
     return (
         <div >
             <div className={`b24-widget-button-shadow ${open ? "b24-widget-button-show" : ""}`} onClick={close} />
-            <div className={`b24-widget-button-wrapper b24-widget-button-position-bottom-right b24-widget-button-visible ${open ? "b24-widget-button-bottom" : ""}`}>
+            <div 
+                className={`b24-widget-button-wrapper b24-widget-button-position-bottom-right b24-widget-button-visible ${open ? "b24-widget-button-bottom" : ""}`}
+                style={{ display: chatOpen ? 'none' : 'block' }}
+            >
                 <div className={`b24-widget-button-social ${open ? "b24-widget-button-show" : "b24-widget-button-hide"}`}>
                     {logoContacts.map((contact, index) => (
                         <a
@@ -112,20 +121,16 @@ const Wingets = ({ configWeb }) => {
                 {/* Support label under the main button */}
 
             </div>
-            {/* <div
-                className="b24-widget-support-label"
-                style={{
-                    // marginTop: 10,
-                    marginBottom: 30,
-                    marginRight: 20,
-                    fontSize: 15,
-                    color: "#008eecff",
-                    lineHeight: 1.2,
-                    userSelect: "none",
-                }}
-            >
-                Hỗ trợ
-            </div> */}
+            {/* Chat Widget - Render outside the b24 wrapper */}
+            <div>
+                {username && (
+                    <ChatWidget
+                        username={username}
+                        externalOpen={chatOpen}
+                        onExternalToggle={setChatOpen}
+                    />
+                )}
+            </div>
         </div >
     );
 };

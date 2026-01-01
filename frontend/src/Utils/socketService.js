@@ -5,7 +5,7 @@ let socket = null;
 // Khởi tạo kết nối Socket.IO
 export const initSocketConnection = (username) => {
   // Lấy URL backend từ env hoặc config
-  const SOCKET_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+  const SOCKET_URL = process.env.REACT_APP_API_BASE || 'http://localhost:5000';
   
   if (!socket) {
     socket = io(SOCKET_URL, {
@@ -39,6 +39,8 @@ export const onDepositSuccess = (callback) => {
     return;
   }
   
+  // Remove old listener trước khi add new
+  socket.off('deposit-success');
   socket.on('deposit-success', (data) => {
     callback(data);
   });
@@ -50,7 +52,35 @@ export const onOrderSuccess = (callback) => {
     return;
   }
   
+  // Remove old listener trước khi add new
+  socket.off('order-success');
   socket.on('order-success', (data) => {
+    callback(data);
+  });
+};
+
+// Lắng nghe tin nhắn chat mới
+export const onNewChatMessage = (callback) => {
+  if (!socket) {
+    return;
+  }
+  
+  // Remove old listener trước khi add new
+  socket.off('new-chat-message');
+  socket.on('new-chat-message', (data) => {
+    callback(data);
+  });
+};
+
+// Lắng nghe tin nhắn chat mới cho admin
+export const onAdminNewChatMessage = (callback) => {
+  if (!socket) {
+    return;
+  }
+  
+  // Remove old listener trước khi add new
+  socket.off('admin-new-chat-message');
+  socket.on('admin-new-chat-message', (data) => {
     callback(data);
   });
 };

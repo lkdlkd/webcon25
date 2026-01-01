@@ -90,9 +90,26 @@ function emitOrderSuccess(username, data) {
     console.log(`📢 Đã emit event order-success cho user: ${username}`);
 }
 
+// Emit event tin nhắn chat mới
+function emitNewChatMessage(username, data) {
+    if (!io) {
+        console.warn('⚠️ Socket.IO chưa được khởi tạo, không thể emit event');
+        return;
+    }
+    
+    // Emit đến room của user cụ thể
+    io.to(`user:${username}`).emit('new-chat-message', data);
+    
+    // Emit đến tất cả admins
+    io.emit('admin-new-chat-message', data);
+    
+    console.log(`📢 Đã emit event new-chat-message cho user: ${username}`);
+}
+
 module.exports = {
     initSocket,
     getIO,
     emitDepositSuccess,
-    emitOrderSuccess
+    emitOrderSuccess,
+    emitNewChatMessage
 };

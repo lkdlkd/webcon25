@@ -164,7 +164,7 @@ const Layout = () => {
                 </div>
             </footer>
 
-            <Widget configWeb={configWeb} />
+            <Widget configWeb={configWeb} username={user?.username} />
             <ToastContainer style={{ maxWidth: '70%', marginLeft: 'auto', marginRight: '0px' }} />
             {/* Footer JS - inject trước </body> */}
             <FooterJs htmlString={footerJs} />

@@ -27,6 +27,7 @@ const refillCancelController = require('../controllers/order/RefilandCancelContr
 const captchaController = require('@/controllers/captcha/captchaController'); // CAPTCHA controller
 
 const refund = require('@/controllers/order/refundController');
+const chatController = require('../controllers/chat/chatController');
 // router.get('/home', authenticate.authenticateUser, Home.getHomeOverview);
 router.get('/refund', authenticate.authenticateAdmin, refund.getRefunds);
 router.post('/refund/approve', authenticate.authenticateAdmin, refund.adminApproveRefund);
@@ -111,7 +112,7 @@ router.post("/getUid", toolController.getUid);
 // Config web routes
 router.get("/configweb", authenticate.authenticateUser, configwebController.getConfigweb); // Lấy cấu hình website
 router.put("/configweb", authenticate.authenticateAdmin, configwebController.updateConfigweb); // Cập nhật cấu hình website
-router.get("/configweblogo",recaptchaLimiter, configwebController.getConfigwebLogo); // Lấy logo website
+router.get("/configweblogo", recaptchaLimiter, configwebController.getConfigwebLogo); // Lấy logo website
 // Config card routes
 router.get("/config-card", authenticate.authenticateAdmin, configCardController.getConfigCard); // Lấy cấu hình thẻ nạp
 router.put("/config-card", authenticate.authenticateAdmin, configCardController.updateConfigCard); // Cập nhật cấu hình thẻ nạp
@@ -149,4 +150,11 @@ router.put('/promotions/:id', authenticate.authenticateAdmin, updatePromotion);
 // Route để xóa chương trình khuyến mãi
 router.delete('/promotions/:id', authenticate.authenticateAdmin, deletePromotion);
 
+// Chat routes
+router.get('/chat/list', authenticate.authenticateAdmin, chatController.getChatList);
+router.get('/chat/unread/count', authenticate.authenticateUser, chatController.getUnreadCount);
+router.get('/chat/:username', authenticate.authenticateUser, chatController.getChatDetail);
+router.post('/chat/send',recaptchaLimiter, authenticate.authenticateUser, chatController.sendMessage);
+router.put('/chat/:username/read', authenticate.authenticateUser, chatController.markAsRead);
+router.delete('/chat/:username', authenticate.authenticateAdmin, chatController.deleteChat);
 module.exports = router;
