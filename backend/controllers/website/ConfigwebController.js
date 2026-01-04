@@ -80,7 +80,7 @@ exports.getConfigwebLogo = async (req, res) => {
     if (!config) {
       config = new Configweb({
         tieude: "",
-        logo: "",
+        logo: "/img/favicon.png",
         favicon: "",
         linktele: "",
         title: "",

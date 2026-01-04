@@ -15,15 +15,27 @@ let processedOrdersCount = 0;
 let totalProcessedOrders = 0;
 let tongdon = 0;
 
-// ===== PER-SOURCE PAGINATION (mỗi nguồn chỉ gọi 1 chunk tối đa 100 đơn/lần) =====
-const domainChunkState = {}; // { [domainId]: { nextIndex: number } }
-const CHUNK_SIZE = 50; // tối đa 100 đơn/1 lần gọi API theo yêu cầu
-const MAX_CHUNK_PER_RUN = 1; // mỗi nguồn chỉ xử lý 1 chunk mỗi lần cron
-const PER_DOMAIN_INTERVAL_MS = 15_000; // thời gian giãn cách tối thiểu giữa 2 lần gọi 1 nguồn
-const RATE_LIMIT_COOLDOWN_MS = 60_000; // cooldown khi bị rate limit
-const REQUEST_TIMEOUT_MS = 15_000; // timeout cho mỗi lần gọi trạng thái chunk
-const BATCH_SIZE = 500; // số đơn tối đa mỗi batch query
-const MAX_TOTAL_ORDERS = 5000; // số đơn tối đa xử lý mỗi lần chạy cron
+// ===== CONFIG =====
+const CHUNK_SIZE = 50; // tăng lên 50 đơn/chunk để giảm số lần gọi API
+const PER_DOMAIN_INTERVAL_MS = 10_000; // giảm xuống 10s
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 20_000; // tăng timeout
+const BATCH_SIZE = 500; // tăng batch size
+const MAX_TOTAL_ORDERS = 5000; // tăng số đơn xử lý
+const MAX_RETRIES = 3;
+const MAX_PARALLEL_DOMAINS = 3; // số nguồn gọi song song
+
+// Helper: Kiểm tra lỗi nghiêm trọng không cần retry
+const isFatalError = (msg, code) => {
+  const fatalPatterns = /api key|authentication|unauthorized|forbidden|invalid.*key|key.*invalid|không tồn tại|incorrect.*order.*id/i;
+  return fatalPatterns.test(msg) || fatalPatterns.test(code) || code === 500;
+};
+
+// Helper: Kiểm tra lỗi mạng tạm thời
+const isTransientError = (msg, code) => {
+  return code === 'ECONNRESET' || code === 'ECONNABORTED' || code === 'read ECONNRESET' ||
+    /ECONNRESET|socket hang up|network error|timeout/i.test(msg);
+};
 
 // ===== TELEGRAM QUEUE (tránh spam API) =====
 const telegramQueue = [];
@@ -233,11 +245,10 @@ async function checkOrderStatus() {
       groups[domainSmmId].orders.push(order);
     }
 
-    // Arrays cho bulk operations
-    const ordersToUpdate = [];
-    const refundsToInsert = [];
-    const historiesToInsert = [];
-    const usersToUpdate = new Map();
+    // Cache users một lần cho tất cả orders
+    const allUsernames = [...new Set(runningOrders.map(o => o.username))];
+    const allUsers = await User.find({ username: { $in: allUsernames } }).lean();
+    const globalUserCache = new Map(allUsers.map(u => [u.username, u]));
 
     // Tạo state cho từng nguồn (vòng lặp round-robin để xử lý hết đơn trong 1 lần cron)
     const domainStates = {};
@@ -268,181 +279,143 @@ async function checkOrderStatus() {
       };
     }
 
-    // Vòng lặp: xử lý hết tất cả chunks của mọi nguồn
+    // Vòng lặp: xử lý song song nhiều nguồn
     while (true) {
-      let didWork = false;
+      const now = Date.now();
 
-      for (const groupKey in domainStates) {
-        const state = domainStates[groupKey];
-        if (!state.chunks.length) continue;
-        const now = Date.now();
-        if (now < state.nextAvailableAt) continue; // phải chờ giãn cách giữa 2 lần gọi cùng nguồn
+      // Lấy các nguồn sẵn sàng để gọi (tối đa MAX_PARALLEL_DOMAINS)
+      const readyDomains = Object.entries(domainStates)
+        .filter(([_, s]) => s.chunks.length > 0 && now >= s.nextAvailableAt)
+        .slice(0, MAX_PARALLEL_DOMAINS);
+
+      if (readyDomains.length === 0) {
+        const hasPending = Object.values(domainStates).some(s => s.chunks.length > 0);
+        if (!hasPending) break;
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+
+      // Xử lý song song các nguồn
+      await Promise.all(readyDomains.map(async ([groupKey, state]) => {
 
         const { ids, tries } = state.chunks.shift();
-        const currentChunkSet = new Set(ids.map(id => id?.toString()));
+        const currentChunkSet = new Set(ids.map(String));
         let resData = {};
         try {
           const res = await withTimeout(
             state.smmService.multiStatus(ids),
             REQUEST_TIMEOUT_MS,
-            `multiStatus ${groupKey} size=${ids.length}`
+            `multiStatus ${groupKey}`
           );
-          // Kiểm tra response hợp lệ
+
+          // Response không hợp lệ
           if (!res || typeof res !== 'object') {
-            console.error(`❌ [${groupKey}] Response không hợp lệ (null/undefined/not object)`);
-            console.error(res);
-            state.chunks.push({ ids, tries: tries + 1 });
-            state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-            continue;
+            if (tries < MAX_RETRIES) state.chunks.push({ ids, tries: tries + 1 });
+            state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
+            return;
           }
 
           const rawErr = res.error || res.err || res.Error;
-          const codeErr = res.code || res.status;
-          // Nếu có error field hoặc response không chứa data hợp lệ
           if (rawErr) {
-            const code = Number(codeErr) || 0;
-            const errCode = typeof rawErr === 'string' ? rawErr : (rawErr?.code || rawErr?.error || rawErr?.name);
+            const errCode = typeof rawErr === 'string' ? rawErr : (rawErr?.code || rawErr?.error || '');
             const msg = typeof rawErr === 'string' ? rawErr : (rawErr?.message || '');
+            const code = Number(res.code || res.status) || 0;
 
-            if ((rawErr?.code === 'ETIMEDOUT') || /timeout/i.test(msg)) {
-              console.warn(`⏰ [${groupKey}] TIMEOUT chunk (size=${ids.length}) sau ${REQUEST_TIMEOUT_MS}ms`);
-              state.chunks.push({ ids, tries: tries + 1 });
-              state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-              continue;
+            // Lỗi nghiêm trọng - bỏ qua
+            if (isFatalError(msg, errCode) || isFatalError(msg, code)) {
+              console.warn(`🚫 [${groupKey}] Bỏ chunk (${ids.length} IDs): ${errCode || msg}`);
+              state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
+              return;
             }
 
-            if (errCode === 'read ECONNRESET' || errCode === 'ECONNRESET' || errCode === 'ECONNABORTED' || /ECONNRESET|socket hang up|network error/i.test(msg)) {
-              console.warn(`🌐 [${groupKey}] NETWORK ERROR (${errCode || 'unknown'}) chunk (size=${ids.length}): ${msg}`);
-              if (tries >= 2) {
-                console.error(`🚫 [${groupKey}] Bỏ chunk sau ${tries} lần ECONNRESET`);
-                continue;
-              }
-              state.chunks.push({ ids, tries: tries + 1 });
-              state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-              continue;
-            }
-
-            console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
-            if (/incorrect.*order.*id/i.test(msg) || /incorrect.*order.*id/i.test(errCode)) {
-              console.warn(`🚫 [${groupKey}] Bỏ chunk do order IDs không hợp lệ (${ids.length} IDs)`);
-              continue;
-            }
-            if (code === 500) {
-              console.warn(`🚫 [${groupKey}] Bỏ chunk do lỗi 500 từ server (${ids.length} IDs)`);
-              continue;
-            }
-
+            // Rate limit
             if (code === 429 || /rate|limit|too many/i.test(msg)) {
-              state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;
               state.chunks.unshift({ ids, tries });
-            } else {
+              state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+              return;
+            }
+
+            // Retry nếu chưa quá giới hạn
+            if (tries < MAX_RETRIES) {
               state.chunks.push({ ids, tries: tries + 1 });
+            } else {
+              console.warn(`🚫 [${groupKey}] Bỏ chunk sau ${tries} lần (${ids.length} IDs)`);
             }
-            state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-            continue;
+            state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
+            return;
           }
-          // Response hợp lệ: assign data
-          resData = Object.assign({}, res);
+
+          resData = res;
         } catch (err) {
-          const code = err?.response?.status;
-          const errCode = (typeof err === 'string') ? err : (err?.code || err?.error);
-          const msg = (typeof err === 'string') ? err : (err?.message || '');
-          if ((err?.code === 'ETIMEDOUT') || /timeout/i.test(msg)) {
-            console.warn(`⏰ [${groupKey}] TIMEOUT chunk (size=${ids.length}) sau ${REQUEST_TIMEOUT_MS}ms`);
-            // timeout: đẩy chunk về cuối để thử lại sau, giữ pacing
+          const errCode = err?.code || '';
+          const msg = err?.message || '';
+
+          // Lỗi nghiêm trọng
+          if (isFatalError(msg, errCode)) {
+            console.warn(`🚫 [${groupKey}] Bỏ chunk: ${errCode || msg}`);
+            state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
+            return;
+          }
+
+          // Lỗi mạng tạm thời hoặc timeout - retry
+          if (isTransientError(msg, errCode) && tries < MAX_RETRIES) {
             state.chunks.push({ ids, tries: tries + 1 });
-            state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-            continue;
+          } else if (tries >= MAX_RETRIES) {
+            console.warn(`🚫 [${groupKey}] Bỏ chunk sau ${tries} lần`);
           }
-          // Network transient errors (e.g., ECONNRESET / socket hang up)
-          if (errCode === 'read ECONNRESET' || errCode === 'ECONNRESET' || errCode === 'ECONNABORTED' || /ECONNRESET|socket hang up|network error/i.test(msg)) {
-            console.warn(`🌐 [${groupKey}] NETWORK ERROR (${errCode || 'unknown'}) chunk (size=${ids.length}): ${msg}`);
-
-            if (tries >= 2) {
-              console.error(`🚫 [${groupKey}] Bỏ chunk sau ${tries} lần ECONNRESET`);
-              continue; // bỏ qua chunk này
-            }
-            state.chunks.push({ ids, tries: tries + 1 });
-            state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-            continue;
-          }
-          console.error(`❌ [${groupKey}] Lỗi chunk (size=${ids.length})`, { status: code, code: errCode, error: msg });
-
-          // Nếu là lỗi "Incorrect order IDs" -> bỏ qua chunk này (không retry)
-          if (/incorrect.*order.*id/i.test(msg) || /incorrect.*order.*id/i.test(errCode)) {
-            console.warn(`🚫 [${groupKey}] Bỏ chunk do order IDs không hợp lệ (${ids.length} IDs)`);
-            continue;
-          }
-
-          // Nếu rate limit -> đặt cooldown và đẩy chunk lại đầu hàng đợi
-          if (code === 429 || /rate|limit|too many/i.test(msg)) {
-            state.nextAvailableAt = Date.now() + RATE_LIMIT_COOLDOWN_MS;
-            state.chunks.unshift({ ids, tries });
-          } else {
-            // lỗi khác: đẩy chunk về cuối để thử lại sau
-            state.chunks.push({ ids, tries: tries + 1 });
-          }
-
-          // đặt giãn cách tối thiểu trước khi gọi lại nguồn này
-          state.nextAvailableAt = Math.max(state.nextAvailableAt, Date.now() + PER_DOMAIN_INTERVAL_MS);
-          continue;
+          state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
+          return;
         }
 
-        // Gọi OK: đặt giãn cách cho lần gọi tiếp theo của nguồn này
+        // Đặt giãn cách cho lần gọi tiếp theo
         state.nextAvailableAt = Date.now() + PER_DOMAIN_INTERVAL_MS;
-        const returnedKeys = new Set(Object.keys(resData || {}));
-        console.log(`📦 [${groupKey}] trả ${returnedKeys.size}/${ids.length} đơn (còn ${state.chunks.length} chunk chờ)`);
 
-        // Cache Users cho group này (1 lần mỗi vòng lặp domain)
-        const usernames = [...new Set(state.orders.map(o => o.username))];
-        const users = await User.find({ username: { $in: usernames } }).lean();
-        const userCache = {};
-        users.forEach(u => {
-          userCache[u.username] = u;
-          if (!usersToUpdate.has(u.username)) {
-            usersToUpdate.set(u.username, { ...u, balanceChange: 0 });
+        // Filter orders có lỗi riêng lẻ
+        let validCount = 0;
+        for (const key in resData) {
+          if (resData[key]?.error || resData[key]?.err) {
+            delete resData[key];
+          } else {
+            validCount++;
           }
-        });
+        }
 
-        // Arrays cho chunk hiện tại
+        if (validCount === 0) return;
+        console.log(`📦 [${groupKey}] ${validCount}/${ids.length} đơn OK (còn ${state.chunks.length} chunk)`);
+
+        // Arrays cho chunk
         const chunkOrdersToUpdate = [];
         const chunkRefundsToInsert = [];
         const chunkHistoriesToInsert = [];
-        const chunkUsersToUpdate = new Map();
+        const chunkUserBalanceChanges = new Map();
 
-        // Xử lý chỉ các order có dữ liệu trả về trong chunk
+        // Xử lý orders trong chunk
         for (const order of state.orders) {
-          const key = order.orderId?.toString();
+          const key = String(order.orderId || '');
           if (!currentChunkSet.has(key)) continue;
+
           const statusObj = resData[key];
-          if (!statusObj) continue; // thiếu -> sẽ được thử lại bởi chunk kế tiếp
+          if (!statusObj) continue;
+
           const mappedStatus = mapStatus(statusObj.status);
+          if (!mappedStatus) continue;
+
           const updateData = {};
+          const remains = Number(statusObj.remains) || 0;
+          const startCount = statusObj.start_count;
 
-          // Chỉ update status nếu thay đổi
-          if (mappedStatus && mappedStatus !== order.status) {
-            updateData.status = mappedStatus;
-          }
+          // Update status
+          if (mappedStatus !== order.status) updateData.status = mappedStatus;
 
-          // Chỉ update start nếu thay đổi
-          if (statusObj.start_count !== undefined && statusObj.start_count !== order.start) {
-            updateData.start = statusObj.start_count;
-          }
+          // Update start
+          if (startCount !== undefined && startCount !== order.start) updateData.start = startCount;
 
-          // Tính dachay mới
-          let newDachay;
-          if (['Pending', 'In progress', 'Processing'].includes(mappedStatus) && Number(statusObj.remains) === 0) {
-            newDachay = 0;
-          } else if (statusObj.remains !== undefined) {
-            newDachay = order.quantity - Number(statusObj.remains);
-          }
+          // Update dachay
+          const newDachay = ['Pending', 'In progress', 'Processing'].includes(mappedStatus) && remains === 0
+            ? 0 : (statusObj.remains !== undefined ? order.quantity - remains : undefined);
+          if (newDachay !== undefined && newDachay !== order.dachay) updateData.dachay = newDachay;
 
-          // Chỉ update dachay nếu thay đổi
-          if (newDachay !== undefined && newDachay !== order.dachay) {
-            updateData.dachay = newDachay;
-          }
-
-          const user = userCache[order.username];
+          const user = globalUserCache.get(order.username);
           if (!user) {
             if (Object.keys(updateData).length > 0) {
               chunkOrdersToUpdate.push({ filter: { _id: order._id }, update: updateData });
@@ -464,29 +437,19 @@ async function checkOrderStatus() {
 
           if (soTienHoan > 50 && ['Partial', 'Canceled'].includes(mappedStatus)) {
             const isApproved = state.smmConfig.autohoan === 'on';
+            if (mappedStatus === 'Canceled') updateData.dachay = 0;
 
-            // Nếu Canceled, set dachay = 0 (chưa chạy gì)
-            if (mappedStatus === 'Canceled') {
-              updateData.dachay = 0;
-            }
+            const refundDesc = `Hệ thống hoàn cho bạn ${Math.floor(soTienHoan).toLocaleString('en-US')}đ tương đương với số lượng ${chuachay} cho uid ${order.link} và ${phihoan} phí dịch vụ`;
 
-            // Prepare refund
             chunkRefundsToInsert.push({
               updateOne: {
                 filter: { madon: order.Madon },
                 update: {
                   $setOnInsert: {
-                    username: order.username,
-                    madon: order.Madon,
-                    link: order.link,
-                    server: order.namesv || '',
-                    soluongmua: order.quantity,
-                    giatien: order.rate,
-                    chuachay,
-                    tonghoan: soTienHoan,
-                    noidung: `Hệ thống hoàn cho bạn ${Number(Math.floor(soTienHoan)).toLocaleString('en-US')}đ tương đương với số lượng ${chuachay} cho uid ${order.link} và ${phihoan} phí dịch vụ`,
-                    status: isApproved,
-                    createdAt: new Date()
+                    username: order.username, madon: order.Madon, link: order.link,
+                    server: order.namesv || '', soluongmua: order.quantity, giatien: order.rate,
+                    chuachay, tonghoan: soTienHoan, noidung: refundDesc,
+                    status: isApproved, createdAt: new Date()
                   }
                 },
                 upsert: true
@@ -494,26 +457,15 @@ async function checkOrderStatus() {
             });
 
             if (isApproved) {
-              const userData = chunkUsersToUpdate.get(order.username) || {
-                username: order.username,
-                balance: user.balance,
-                balanceChange: 0
-              };
-              userData.balanceChange = (userData.balanceChange || 0) + soTienHoan;
-              chunkUsersToUpdate.set(order.username, userData);
+              const prevChange = chunkUserBalanceChanges.get(order.username) || 0;
+              chunkUserBalanceChanges.set(order.username, prevChange + soTienHoan);
 
               chunkHistoriesToInsert.push({
-                username: order.username,
-                madon: order.Madon,
-                hanhdong: "Hoàn tiền",
-                link: order.link,
-                tienhientai: user.balance,
-                tongtien: soTienHoan,
-                tienconlai: user.balance + userData.balanceChange,
-                mota: `Hệ thống hoàn cho bạn ${Number(Math.floor(soTienHoan)).toLocaleString('en-US')}đ tương đương với số lượng ${chuachay} cho uid ${order.link} và ${phihoan} phí dịch vụ`,
-                createdAt: new Date()
+                username: order.username, madon: order.Madon, hanhdong: "Hoàn tiền",
+                link: order.link, tienhientai: user.balance, tongtien: soTienHoan,
+                tienconlai: user.balance + prevChange + soTienHoan,
+                mota: refundDesc, createdAt: new Date()
               });
-
               updateData.iscancel = false;
             } else {
               updateData.iscancel = true;
@@ -522,69 +474,47 @@ async function checkOrderStatus() {
             queueTelegramNotification(teleConfig, order, soTienHoan, chuachay, isApproved, phihoan);
           }
 
-          if (hasOrderChanged(updateData, order)) {
+          if (Object.keys(updateData).length > 0 && hasOrderChanged(updateData, order)) {
             chunkOrdersToUpdate.push({ filter: { _id: order._id }, update: updateData });
           }
-
           processedOrdersCount++;
         }
 
-        // ===== LƯU DB NGAY SAU KHI XỬ LÝ XONG CHUNK =====
-        const chunkBulkPromises = [];
+        // Bulk operations
+        const bulkOps = [];
 
-        // Bulk update Orders cho chunk
         if (chunkOrdersToUpdate.length > 0) {
-          const bulkOps = chunkOrdersToUpdate.map(({ filter, update }) => ({
-            updateOne: { filter, update: { $set: update } }
-          }));
-          chunkBulkPromises.push(Order.bulkWrite(bulkOps, { ordered: false }));
+          bulkOps.push(Order.bulkWrite(
+            chunkOrdersToUpdate.map(({ filter, update }) => ({ updateOne: { filter, update: { $set: update } } })),
+            { ordered: false }
+          ));
         }
 
-        // Bulk upsert Refunds cho chunk
         if (chunkRefundsToInsert.length > 0) {
-          chunkBulkPromises.push(Refund.bulkWrite(chunkRefundsToInsert, { ordered: false }));
+          bulkOps.push(Refund.bulkWrite(chunkRefundsToInsert, { ordered: false }));
         }
 
-        // Bulk insert Histories cho chunk
         if (chunkHistoriesToInsert.length > 0) {
-          chunkBulkPromises.push(HistoryUser.insertMany(chunkHistoriesToInsert, { ordered: false }));
+          bulkOps.push(HistoryUser.insertMany(chunkHistoriesToInsert, { ordered: false }));
         }
 
-        // Bulk update Users cho chunk
-        const chunkUserBulkOps = [];
-        for (const [username, userData] of chunkUsersToUpdate.entries()) {
-          if (userData.balanceChange > 0) {
-            chunkUserBulkOps.push({
-              updateOne: {
-                filter: { username },
-                update: { $inc: { balance: userData.balanceChange } }
-              }
-            });
-
-            // Cập nhật global usersToUpdate để tracking đúng
-            const globalUserData = usersToUpdate.get(username) || { balance: userData.balance, balanceChange: 0 };
-            globalUserData.balanceChange = (globalUserData.balanceChange || 0) + userData.balanceChange;
-            usersToUpdate.set(username, globalUserData);
-          }
-        }
-        if (chunkUserBulkOps.length > 0) {
-          chunkBulkPromises.push(User.bulkWrite(chunkUserBulkOps, { ordered: false }));
+        if (chunkUserBalanceChanges.size > 0) {
+          const userOps = [...chunkUserBalanceChanges.entries()]
+            .filter(([_, amt]) => amt > 0)
+            .map(([username, amt]) => ({ updateOne: { filter: { username }, update: { $inc: { balance: amt } } } }));
+          if (userOps.length > 0) bulkOps.push(User.bulkWrite(userOps, { ordered: false }));
         }
 
-        // Execute all bulk operations cho chunk này
-        if (chunkBulkPromises.length > 0) {
-          await Promise.all(chunkBulkPromises);
-          console.log(`💾 [${groupKey}] Đã lưu ${chunkOrdersToUpdate.length} orders, ${chunkRefundsToInsert.length} refunds, ${chunkHistoriesToInsert.length} histories, ${chunkUserBulkOps.length} users`);
+        if (bulkOps.length > 0) {
+          await Promise.all(bulkOps);
+          console.log(
+            `💾 [${groupKey}] Đã lưu ${chunkOrdersToUpdate.length} orders, ` +
+            `${chunkRefundsToInsert.length} refunds, ` +
+            `${chunkHistoriesToInsert.length} histories, ` +
+            `${chunkUserBalanceChanges.size} users`
+          );
         }
-
-        didWork = true;
-      }
-      // nếu vòng này không làm gì nhưng vẫn còn chunk chờ cooldown -> sleep ngắn rồi lặp lại
-      const hasPending = Object.values(domainStates).some(s => s.chunks.length > 0);
-      if (!hasPending) break;
-      if (!didWork) {
-        await new Promise(r => setTimeout(r, 1000));
-      }
+      })); // end Promise.all for parallel domains
     }
     // end while loop: all chunks processed
 
