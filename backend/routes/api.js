@@ -44,22 +44,44 @@ const recaptchaLimiter = rateLimit({
   }
 });
 
+const orderLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60, // 60 đơn / phút
+  message: { error: 'Bạn thao tác quá nhanh với đơn hàng' }
+});
+
+const WebLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30, // 30 đơn / phút
+  message: { error: 'Bạn thao tác quá nhanh với đơn hàng' }
+});
+const apiV2Limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100, // 100 requests / phút
+  message: { error: 'Vượt quá giới hạn API' }
+});
+
+
 // Route lấy site key với rate-limit
 router.get('/recaptcha-site-key', recaptchaLimiter, captchaController.getSiteKey);
 router.post('/login', recaptchaLimiter, user.login);//ok
 router.post('/register', recaptchaLimiter, user.register);//ok
+// Auth routes - refresh token và logout
+router.post('/auth/refresh', recaptchaLimiter, user.refreshToken); // Refresh access token
+router.post('/auth/logout', recaptchaLimiter, user.logout); // Logout (xóa refresh token)
+router.post('/auth/logout-all', recaptchaLimiter, authenticate.authenticateUser, user.logoutAll); // Logout tất cả thiết bị
 // 2FA routes
-router.post('/2fa/setup', authenticate.authenticateUser, user.setup2FA); // Tạo secret tạm & QR
-router.post('/2fa/verify', authenticate.authenticateUser, user.verify2FA); // Xác minh & bật 2FA
-router.post('/2fa/disable', authenticate.authenticateUser, user.disable2FA); // Tắt 2FA
+router.post('/2fa/setup', orderLimiter, authenticate.authenticateUser, user.setup2FA); // Tạo secret tạm & QR
+router.post('/2fa/verify', orderLimiter, authenticate.authenticateUser, user.verify2FA); // Xác minh & bật 2FA
+router.post('/2fa/disable', orderLimiter, authenticate.authenticateUser, user.disable2FA); // Tắt 2FA
 // noti
 
 // banking
 router.get('/banking', authenticate.authenticateUser, banking.getBank); // ok Lấy thông tin ngân hàng của người dùng 
 // api v2
-router.post('/v2', apiv2.routeRequest); // ok Tất cả các yêu cầu POST tới endpoint này sẽ được chuyển qua hàm routeRequest
+router.post('/v2', apiV2Limiter, apiv2.routeRequest); // ok Tất cả các yêu cầu POST tới endpoint này sẽ được chuyển qua hàm routeRequest
 //thecao 
-router.post('/thecao/recharge', authenticate.authenticateUser, card.createTransaction); // ok Nạp thẻ cào
+router.post('/thecao/recharge', WebLimiter, authenticate.authenticateUser, card.createTransaction); // ok Nạp thẻ cào
 router.get('/thecao', authenticate.authenticateUser, card.getCard); // ok Lấy  chiết khấu thẻ cào
 router.get('/thecao/history', authenticate.authenticateUser, card.GetHistoryCard); // ok Lấy lịch sử nạp thẻ cào theo ID người dùng
 //user 
@@ -79,7 +101,7 @@ router.post('/server/create', authenticate.authenticateAdmin, server.addServer);
 router.delete('/server/delete/:id', authenticate.authenticateAdmin, server.deleteServer); // ok Lấy thông tin một máy chủ theo ID
 router.put('/server/update/:id', authenticate.authenticateAdmin, server.updateServer); // ok Cập nhật thông tin máy chủ
 // order
-router.post('/order/add', authenticate.authenticateUser, addOrder); // ok Thêm đơn hàng mới
+router.post('/order/add', orderLimiter, authenticate.authenticateUser, addOrder); // ok Thêm đơn hàng mới
 router.get('/order', authenticate.authenticateUser, getOrders); // ok Lấy danh sách đơn hàng của người dùng
 router.put('/order/update/:Madon', authenticate.authenticateAdmin, updateOrderStatus); // Cập nhật trạng thái đơn hàng
 router.get('/scheduled-orders', authenticate.authenticateUser, scheduledController.getScheduledOrders);
@@ -154,7 +176,7 @@ router.delete('/promotions/:id', authenticate.authenticateAdmin, deletePromotion
 router.get('/chat/list', authenticate.authenticateAdmin, chatController.getChatList);
 router.get('/chat/unread/count', authenticate.authenticateUser, chatController.getUnreadCount);
 router.get('/chat/:username', authenticate.authenticateUser, chatController.getChatDetail);
-router.post('/chat/send',recaptchaLimiter, authenticate.authenticateUser, chatController.sendMessage);
+router.post('/chat/send', WebLimiter, authenticate.authenticateUser, chatController.sendMessage);
 router.put('/chat/:username/read', authenticate.authenticateUser, chatController.markAsRead);
 router.delete('/chat/:username', authenticate.authenticateAdmin, chatController.deleteChat);
 module.exports = router;

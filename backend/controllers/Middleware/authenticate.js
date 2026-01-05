@@ -3,14 +3,20 @@ const User = require("../../models/User");
 
 // Middleware xác thực user (chỉ cần đăng nhập)
 const authenticateUser = async (req, res, next) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    // Ưu tiên lấy token từ cookie, fallback về Authorization header
+    let token = req.cookies?.accessToken;
+    
+    if (!token) {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.split(" ")[1];
+        }
+    }
+    
+    if (!token) {
         return res.status(401).json({ error: "Không có token, truy cập bị từ chối" });
     }
-    const token = authHeader.split(" ")[1];
-    if (!token) {
-        return res.status(401).json({ error: "Token không hợp lệ" });
-    }
+    
     try {
         const decoded = jwt.verify(token, process.env.secretKey);
         const user = await User.findById(decoded.userId);

@@ -7,6 +7,70 @@ const Telegram = require('../../models/Telegram');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const Order = require('../../models/Order');
+const RefreshToken = require('../../models/RefreshToken');
+
+// Cấu hình token
+const ACCESS_TOKEN_EXPIRES = '10m'; // Access token hết hạn sau 10 phút
+const REFRESH_TOKEN_EXPIRES_DAYS = 30; // Refresh token hết hạn sau 30 ngày
+
+// Helper tạo access token
+function generateAccessToken(user) {
+  return jwt.sign(
+    { username: user.username, userId: user._id, role: user.role },
+    process.env.secretKey,
+    { expiresIn: ACCESS_TOKEN_EXPIRES }
+  );
+}
+
+// Helper tạo refresh token và lưu vào DB
+async function generateRefreshToken(user, req) {
+  const token = crypto.randomBytes(64).toString('hex');
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
+
+  const ip = req.headers['x-user-ip'] ||
+    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+    req.connection.remoteAddress || null;
+  const userAgent = req.headers['user-agent'] || '';
+
+  // Xóa các refresh token cũ của user (giữ tối đa 5 session)
+  const existingTokens = await RefreshToken.find({ userId: user._id }).sort({ createdAt: -1 });
+  if (existingTokens.length >= 5) {
+    const tokensToDelete = existingTokens.slice(4).map(t => t._id);
+    await RefreshToken.deleteMany({ _id: { $in: tokensToDelete } });
+  }
+
+  await RefreshToken.create({
+    token,
+    userId: user._id,
+    expiresAt,
+    userAgent,
+    ip
+  });
+
+  return { token, expiresAt };
+}
+
+// Helper set cookie cho refresh token
+function setRefreshTokenCookie(res, token, expiresAt) {
+  res.cookie('refreshToken', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'lax',          // 🔥 QUAN TRỌNG
+    expires: expiresAt,
+    path: '/api/auth/refresh' // 🔥 CHỈ đúng endpoint refresh
+  });
+}
+
+// Helper set cookie cho access token (optional - nếu muốn gửi qua cookie thay vì response body)
+function setAccessTokenCookie(res, token) {
+  res.cookie('accessToken', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000, // 10 phút
+    path: '/' // Tất cả các route
+  });
+}
 // Helper gửi tin nhắn Telegram
 async function sendTelegramMessage(chatId, text) {
   try {
@@ -68,16 +132,21 @@ exports.login = async (req, res) => {
 
     // Lưu lịch sử đăng nhập vào mảng loginHistory
     // Ưu tiên lấy IP từ header X-User-IP (IP thật từ client), sau đó mới dùng x-forwarded-for
-    const ip = req.headers['x-user-ip'] ||(req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||req.connection.remoteAddress ||null;
+    const ip = req.headers['x-user-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.connection.remoteAddress || null;
     const userAgent = req.headers['user-agent'] || '';
     user.loginHistory = user.loginHistory || [];
     user.loginHistory.push({ ip, agent: userAgent, time: new Date() });
     await user.save();
-    const token = jwt.sign(
-      { username: user.username, userId: user._id, role: user.role },
-      process.env.secretKey,
-      { expiresIn: '30d' }
-    );
+
+    // Tạo access token (ngắn hạn)
+    const accessToken = generateAccessToken(user);
+
+    // Tạo refresh token (dài hạn) và lưu vào DB
+    const { token: refreshToken, expiresAt } = await generateRefreshToken(user, req);
+
+    // Set cả 2 tokens vào httpOnly cookie
+    setRefreshTokenCookie(res, refreshToken, expiresAt);
+    setAccessTokenCookie(res, accessToken);
 
     // Nếu là admin, gửi thông báo Telegram
     if (user.role === 'admin') {
@@ -109,11 +178,113 @@ exports.login = async (req, res) => {
         }
       }
     }
-    // ✅ Trả về token mới
-    return res.status(200).json({ token, role: user.role, username: user.username, twoFactorEnabled: user.twoFactorEnabled });
+    // ✅ Trả về access token mới (refresh token đã được set trong cookie)
+    return res.status(200).json({
+      token: accessToken,
+      role: user.role,
+      username: user.username,
+      twoFactorEnabled: user.twoFactorEnabled,
+      expiresIn: 10 * 60 // 10 phút tính bằng giây
+    });
   } catch (error) {
     console.error("Login error:", error);
     return res.status(500).json({ error: "Có lỗi xảy ra khi đăng nhập" });
+  }
+};
+
+// Refresh token - tạo access token mới từ refresh token trong cookie
+exports.refreshToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'Không tìm thấy refresh token' });
+    }
+
+    // Tìm refresh token trong DB
+    const tokenDoc = await RefreshToken.findOne({ token: refreshToken });
+
+    if (!tokenDoc) {
+      return res.status(401).json({ error: 'Refresh token không hợp lệ' });
+    }
+
+    // Kiểm tra hết hạn
+    if (tokenDoc.expiresAt < new Date()) {
+      await RefreshToken.deleteOne({ _id: tokenDoc._id });
+      res.clearCookie('refreshToken', { path: '/api/auth' });
+      return res.status(401).json({ error: 'Refresh token đã hết hạn' });
+    }
+
+    // Tìm user
+    const user = await User.findById(tokenDoc.userId);
+
+    if (!user) {
+      await RefreshToken.deleteOne({ _id: tokenDoc._id });
+      res.clearCookie('refreshToken', { path: '/api/auth' });
+      return res.status(401).json({ error: 'Người dùng không tồn tại' });
+    }
+
+    if (user.status !== 'active') {
+      await RefreshToken.deleteOne({ _id: tokenDoc._id });
+      res.clearCookie('refreshToken', { path: '/api/auth' });
+      return res.status(403).json({ error: 'Tài khoản đã bị khóa' });
+    }
+
+    // Tạo access token mới
+    const accessToken = generateAccessToken(user);
+
+    // Set access token vào cookie
+    setAccessTokenCookie(res, accessToken);
+
+    return res.status(200).json({
+      token: accessToken,
+      role: user.role,
+      username: user.username,
+      expiresIn: 10 * 60 // 10 phút tính bằng giây
+    });
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    return res.status(500).json({ error: "Có lỗi xảy ra khi làm mới token" });
+  }
+};
+
+// Logout - xóa refresh token
+exports.logout = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refreshToken;
+
+    if (refreshToken) {
+      // Xóa refresh token khỏi DB
+      await RefreshToken.deleteOne({ token: refreshToken });
+    }
+
+    // Xóa cả 2 cookies
+    res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
+    res.clearCookie('accessToken', { path: '/' });
+
+    return res.status(200).json({ message: 'Đăng xuất thành công' });
+  } catch (error) {
+    console.error("Logout error:", error);
+    return res.status(500).json({ error: "Có lỗi xảy ra khi đăng xuất" });
+  }
+};
+
+// Logout tất cả các thiết bị - xóa tất cả refresh token của user
+exports.logoutAll = async (req, res) => {
+  try {
+    const currentUser = req.user;
+
+    // Xóa tất cả refresh token của user
+    await RefreshToken.deleteMany({ userId: currentUser._id || currentUser.userId });
+
+    // Xóa cả 2 cookies hiện tại
+    res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
+    res.clearCookie('accessToken', { path: '/' });
+
+    return res.status(200).json({ message: 'Đã đăng xuất khỏi tất cả thiết bị' });
+  } catch (error) {
+    console.error("Logout all error:", error);
+    return res.status(500).json({ error: "Có lỗi xảy ra khi đăng xuất" });
   }
 };
 

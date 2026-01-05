@@ -7,10 +7,97 @@ export async function getBankList() {
   return await res.json();
 }
 const API_BASE = `${process.env.REACT_APP_API_BASE}/api`;
+
+// ==================== TOKEN MANAGEMENT ====================
+// NOTE: Token được lưu trong httpOnly cookies và tự động gửi bởi browser
+// localStorage CHỈ dùng để lưu token copy cho UI decode role/username
+// KHÔNG BAO GIỜ dùng localStorage token để authenticate requests
+
+// Lấy token từ localStorage (CHỈ để UI decode role/username, KHÔNG dùng để authenticate)
+export const getStoredToken = () => localStorage.getItem("token");
+
+// Lưu token vào localStorage (CHỈ để UI decode role/username, KHÔNG dùng để authenticate)
+export const setStoredToken = (token) => {
+  if (token) {
+    localStorage.setItem("token", token);
+  } else {
+    localStorage.removeItem("token");
+  }
+};
+
+// Kiểm tra token có hết hạn không (CHỈ dùng cho UI check, backend tự động validate cookie)
+export const isTokenExpired = (token) => {
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    const exp = payload.exp * 1000; // Convert to milliseconds
+    return Date.now() >= exp - 60000; // Hết hạn trước 1 phút
+  } catch {
+    return true;
+  }
+};
+
+// Refresh access token (chỉ dùng để update localStorage cho AuthContext)
+export const refreshAccessToken = async () => {
+  try {
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "include", // Backend tự động đọc refreshToken cookie và set accessToken cookie mới
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Refresh token failed");
+    }
+
+    const data = await response.json();
+    // Lưu vào localStorage chỉ để AuthContext decode role/username
+    setStoredToken(data.token);
+    return data.token;
+  } catch (error) {
+    setStoredToken(null);
+    localStorage.clear();
+    sessionStorage.clear();
+    throw error;
+  }
+};
+
+// Wrapper cho fetch với cookie authentication
+const fetchWithAuth = async (url, options = {}) => {
+  // Token tự động gửi qua httpOnly cookie, không cần logic phức tạp
+  const response = await fetch(url, {
+    ...options,
+    credentials: "include", // Gửi cookies tự động (accessToken + refreshToken)
+    headers: {
+      ...options.headers,
+    },
+  });
+
+  // Nếu nhận 401, backend sẽ tự động refresh token qua cookie
+  // Nếu refresh thất bại, redirect to login
+  if (response.status === 401) {
+    const data = await response.json().catch(() => ({}));
+    if (data.error === "Token không hợp lệ hoặc đã hết hạn") {
+      // Session thực sự hết hạn, redirect
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = "/dang-nhap";
+      throw new Error("Session expired");
+    }
+  }
+
+  return response;
+};
+
+// ==================== END TOKEN MANAGEMENT ====================
+
 export const Home = async (token) => {
-  const response = await fetch(`${API_BASE}/home`, {
+  const response = await fetchWithAuth(`${API_BASE}/home`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -31,20 +118,19 @@ export const getRefunds = async (token, status, page = 1, limit = 20, search = "
     }
   }
 
-  const response = await fetch(`${API_BASE}/refund?${params.toString()}`, {
+  const response = await fetchWithAuth(`${API_BASE}/refund?${params.toString()}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const adminApproveRefund = async (data, token) => {
-  const response = await fetch(`${API_BASE}/refund/approve`, {
+  const response = await fetchWithAuth(`${API_BASE}/refund/approve`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -53,11 +139,10 @@ export const adminApproveRefund = async (data, token) => {
 };
 
 export async function Dongbo(token) {
-  const response = await fetch(`${API_BASE}/admin/sync-services`, {
+  const response = await fetchWithAuth(`${API_BASE}/admin/sync-services`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     cache: "no-store",
   });
@@ -65,11 +150,10 @@ export async function Dongbo(token) {
 }
 
 export const adminDeleteRefunds = async (data, token) => {
-  const response = await fetch(`${API_BASE}/refund`, {
+  const response = await fetchWithAuth(`${API_BASE}/refund`, {
     method: "DELETE",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -78,11 +162,10 @@ export const adminDeleteRefunds = async (data, token) => {
 };
 // Refill đơn hàng
 export const refillOrder = async (madon, token) => {
-  const response = await fetch(`${API_BASE}/refill`, {
+  const response = await fetchWithAuth(`${API_BASE}/refill`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify({ madon }),
     cache: "no-store",
@@ -90,11 +173,10 @@ export const refillOrder = async (madon, token) => {
   return handleResponse(response);
 };
 export const cancelOrder = async (madon, token) => {
-  const response = await fetch(`${API_BASE}/cancel`, {
+  const response = await fetchWithAuth(`${API_BASE}/cancel`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify({ madon }),
     cache: "no-store",
@@ -112,11 +194,11 @@ export const getScheduledOrders = async (
   if (status) params.append("status", status);
 
   const queryString = params.toString();
-  const response = await fetch(
+  const response = await fetchWithAuth(
     `${API_BASE}/scheduled-orders${queryString ? `?${queryString}` : ""}`,
     {
       method: "GET",
-      headers: withNoStore({ Authorization: `Bearer ${token}` }),
+      headers: withNoStore({}),
       cache: "no-store",
     }
   );
@@ -124,11 +206,10 @@ export const getScheduledOrders = async (
 };
 
 export const rescheduleScheduledOrder = async (id, scheduleTime, token) => {
-  const response = await fetch(`${API_BASE}/scheduled-orders/${id}/reschedule`, {
+  const response = await fetchWithAuth(`${API_BASE}/scheduled-orders/${id}/reschedule`, {
     method: "PATCH",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify({ scheduleTime }),
     cache: "no-store",
@@ -137,9 +218,9 @@ export const rescheduleScheduledOrder = async (id, scheduleTime, token) => {
 };
 
 export const cancelScheduledOrder = async (id, token) => {
-  const response = await fetch(`${API_BASE}/scheduled-orders/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/scheduled-orders/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -177,6 +258,7 @@ const handleResponse = async (response) => {
 };
 
 // Auth
+// Login - Backend trả về token trong response body (để UI decode) VÀ set cookies (để authenticate)
 export const login = async (data) => {
   // Lấy IP của người dùng (hỗ trợ cả IPv4 và IPv6)
   let userIP = "";
@@ -198,12 +280,41 @@ export const login = async (data) => {
 
   const response = await fetch(`${API_BASE}/login`, {
     method: "POST",
+    credentials: "include", // Nhận cookies từ server (refreshToken + accessToken)
     headers: withNoStore({
       "Content-Type": "application/json",
       "X-User-IP": userIP // Gửi IP thật của người dùng
     }),
     body: JSON.stringify(data),
   });
+  return handleResponse(response);
+};
+
+// Logout - Backend sẽ xóa cookies, frontend chỉ clear localStorage
+export const logout = async () => {
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      credentials: "include", // Backend sẽ clear cả 2 cookies (accessToken + refreshToken)
+      headers: withNoStore({}),
+    });
+  } catch (e) {
+    console.error("Logout error:", e);
+  }
+  // Clear localStorage/sessionStorage
+  localStorage.clear();
+  sessionStorage.clear();
+};
+
+// Logout tất cả thiết bị
+export const logoutAll = async () => {
+  const response = await fetchWithAuth(`${API_BASE}/auth/logout-all`, {
+    method: "POST",
+    headers: withNoStore({}),
+  });
+  // Clear localStorage/sessionStorage
+  localStorage.clear();
+  sessionStorage.clear();
   return handleResponse(response);
 };
 
@@ -219,6 +330,7 @@ export const getRecaptchaSiteKey = async () => {
 export const register = async (data) => {
   const response = await fetch(`${API_BASE}/register`, {
     method: "POST",
+    credentials: "include", // Support cookies nếu sau này cần
     headers: withNoStore({ "Content-Type": "application/json" }),
     body: JSON.stringify(data),
   });
@@ -227,20 +339,19 @@ export const register = async (data) => {
 
 // Banking
 export const getBanking = async (token) => {
-  const response = await fetch(`${API_BASE}/banking`, {
+  const response = await fetchWithAuth(`${API_BASE}/banking`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const updateBanking = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/banking/update/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/banking/update/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -249,20 +360,19 @@ export const updateBanking = async (id, data, token) => {
 };
 
 export const deleteBanking = async (id, token) => {
-  const response = await fetch(`${API_BASE}/banking/delete/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/banking/delete/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const createBanking = async (data, token) => {
-  const response = await fetch(`${API_BASE}/banking/create`, {
+  const response = await fetchWithAuth(`${API_BASE}/banking/create`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -272,11 +382,10 @@ export const createBanking = async (data, token) => {
 
 // Thẻ cào
 export const rechargeCard = async (data, token) => {
-  const response = await fetch(`${API_BASE}/thecao/recharge`, {
+  const response = await fetchWithAuth(`${API_BASE}/thecao/recharge`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -285,18 +394,18 @@ export const rechargeCard = async (data, token) => {
 };
 
 export const getCard = async (token) => {
-  const response = await fetch(`${API_BASE}/thecao`, {
+  const response = await fetchWithAuth(`${API_BASE}/thecao`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const getCardHistory = async (token) => {
-  const response = await fetch(`${API_BASE}/thecao/history`, {
+  const response = await fetchWithAuth(`${API_BASE}/thecao/history`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -304,20 +413,19 @@ export const getCardHistory = async (token) => {
 
 // User
 export const getMe = async (token) => {
-  const response = await fetch(`${API_BASE}/user`, {
+  const response = await fetchWithAuth(`${API_BASE}/user`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const changePassword = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/user/changePassword/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/changePassword/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -328,11 +436,10 @@ export const changePassword = async (id, data, token) => {
 // 2FA (Two-Factor Authentication)
 // Step 1: Setup - backend should return { otpauthUrl, qrImageDataUrl?, tempSecret }
 export const setup2FA = async (token) => {
-  const response = await fetch(`${API_BASE}/2fa/setup`, {
+  const response = await fetchWithAuth(`${API_BASE}/2fa/setup`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify({}),
     cache: "no-store",
@@ -343,11 +450,10 @@ export const setup2FA = async (token) => {
 // Step 2: Verify - send the code user enters (and optionally the tempSecret if backend requires)
 // Expected backend body fields example: { code }
 export const verify2FA = async (data, token) => {
-  const response = await fetch(`${API_BASE}/2fa/verify`, {
+  const response = await fetchWithAuth(`${API_BASE}/2fa/verify`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -357,11 +463,10 @@ export const verify2FA = async (data, token) => {
 
 // Disable 2FA
 export const disable2FA = async (data = {}, token) => {
-  const response = await fetch(`${API_BASE}/2fa/disable`, {
+  const response = await fetchWithAuth(`${API_BASE}/2fa/disable`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -375,9 +480,9 @@ export const getUserHistory = async (token, page = 1, limit = 10, orderId, searc
   if (search) queryString += `&search=${encodeURIComponent(search)}`;
   if (orderId) queryString += `&orderId=${encodeURIComponent(orderId)}`;
   if (action) queryString += `&action=${encodeURIComponent(action)}`; // Thêm action nếu có
-  const response = await fetch(`${API_BASE}/user/history${queryString}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/history${queryString}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -400,9 +505,9 @@ export const getServer = async (token, page, limit, search = "", filters = {}) =
   if (filters.isActive !== undefined && filters.isActive !== "") params.append("isActive", filters.isActive);
   if (filters.status !== undefined && filters.status !== "") params.append("status", filters.status);
 
-  const response = await fetch(`${API_BASE}/server?${params.toString()}`, {
+  const response = await fetchWithAuth(`${API_BASE}/server?${params.toString()}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -410,11 +515,10 @@ export const getServer = async (token, page, limit, search = "", filters = {}) =
 };
 // Thêm mới máy chủ
 export const createServer = async (data, token) => {
-  const response = await fetch(`${API_BASE}/server/create`, {
+  const response = await fetchWithAuth(`${API_BASE}/server/create`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
     cache: "no-store",
@@ -424,11 +528,9 @@ export const createServer = async (data, token) => {
 
 // Xóa máy chủ
 export const deleteServer = async (id, token) => {
-  const response = await fetch(`${API_BASE}/server/delete/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/server/delete/${id}`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: {},
     cache: "no-store",
   });
   return handleResponse(response);
@@ -436,11 +538,10 @@ export const deleteServer = async (id, token) => {
 
 // Cập nhật thông tin máy chủ
 export const updateServer = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/server/update/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/server/update/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
     cache: "no-store",
@@ -450,11 +551,10 @@ export const updateServer = async (id, data, token) => {
 
 // SMM (Admin)
 export const createSmmPartner = async (data, token) => {
-  const response = await fetch(`${API_BASE}/smm/create`, {
+  const response = await fetchWithAuth(`${API_BASE}/smm/create`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -463,20 +563,19 @@ export const createSmmPartner = async (data, token) => {
 };
 
 export const getAllSmmPartners = async (token) => {
-  const response = await fetch(`${API_BASE}/smm`, {
+  const response = await fetchWithAuth(`${API_BASE}/smm`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 
 export const updatePartnerPrices = async (data, id, token) => {
-  const response = await fetch(`${API_BASE}/smm/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/smm/${id}`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -485,11 +584,10 @@ export const updatePartnerPrices = async (data, id, token) => {
 };
 
 export const updateSmmPartner = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/smm/update/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/smm/update/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -498,9 +596,9 @@ export const updateSmmPartner = async (id, data, token) => {
 };
 
 export const deleteSmmPartner = async (id, token) => {
-  const response = await fetch(`${API_BASE}/smm/delete/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/smm/delete/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -508,11 +606,10 @@ export const deleteSmmPartner = async (id, token) => {
 
 // Order
 export const addOrder = async (data, token) => {
-  const response = await fetch(`${API_BASE}/order/add`, {
+  const response = await fetchWithAuth(`${API_BASE}/order/add`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -528,9 +625,9 @@ export const getOrders = async (token, page = 1, limit = 10, category = "", sear
   if (status) queryString += `&status=${encodeURIComponent(status)}`;
   if (orderTay) queryString += `&ordertay=${encodeURIComponent(orderTay)}`;
 
-  const response = await fetch(`${API_BASE}/order${queryString}`, {
+  const response = await fetchWithAuth(`${API_BASE}/order${queryString}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -538,9 +635,9 @@ export const getOrders = async (token, page = 1, limit = 10, category = "", sear
 };
 
 export const deleteOrder = async (orderId, token) => {
-  const response = await fetch(`${API_BASE}/order/delete/${orderId}`, {
+  const response = await fetchWithAuth(`${API_BASE}/order/delete/${orderId}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -548,11 +645,10 @@ export const deleteOrder = async (orderId, token) => {
 
 // Cập nhật trạng thái đơn hàng (admin)
 export const updateOrderStatus = async (Madon, data, token) => {
-  const response = await fetch(`${API_BASE}/order/update/${Madon}`, {
+  const response = await fetchWithAuth(`${API_BASE}/order/update/${Madon}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -562,11 +658,10 @@ export const updateOrderStatus = async (Madon, data, token) => {
 
 // User (Admin)
 export const updateUser = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/user/update/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/update/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -575,11 +670,10 @@ export const updateUser = async (id, data, token) => {
 };
 
 export const addBalance = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/user/addbalance/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/addbalance/${id}`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -588,11 +682,10 @@ export const addBalance = async (id, data, token) => {
 };
 
 export const deductBalance = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/user/deductbalance/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/deductbalance/${id}`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -601,9 +694,9 @@ export const deductBalance = async (id, data, token) => {
 };
 
 export const deleteUser = async (id, token) => {
-  const response = await fetch(`${API_BASE}/user/delete/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/user/delete/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -614,9 +707,9 @@ export const getUsers = async (token, page = 1, limit = 10, search = "") => {
   let queryString = `?page=${page}&limit=${limit}`;
   if (search) queryString += `&username=${encodeURIComponent(search)}`;
 
-  const response = await fetch(`${API_BASE}/users${queryString}`, {
+  const response = await fetchWithAuth(`${API_BASE}/users${queryString}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -629,9 +722,9 @@ export const getStatistics = async (token, doanhthuRange = "today", customStart,
   if (customStart) queryParams.append("customStart", customStart);
   if (customEnd) queryParams.append("customEnd", customEnd);
 
-  const response = await fetch(`${API_BASE}/thongke?${queryParams.toString()}`, {
+  const response = await fetchWithAuth(`${API_BASE}/thongke?${queryParams.toString()}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -649,20 +742,19 @@ export const getUid = async (data) => {
 };
 // Notification (Thông báo)
 export const getNotifications = async (token) => {
-  const response = await fetch(`${API_BASE}/noti`, {
+  const response = await fetchWithAuth(`${API_BASE}/noti`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 // Thêm thông báo (Chỉ Admin)
 export const addNotification = async (data, token) => {
-  const response = await fetch(`${API_BASE}/noti/add`, {
+  const response = await fetchWithAuth(`${API_BASE}/noti/add`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -673,11 +765,10 @@ export const addNotification = async (data, token) => {
 
 // Sửa thông báo (Chỉ Admin)
 export const editNotification = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/noti/edit/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/noti/edit/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -688,11 +779,9 @@ export const editNotification = async (id, data, token) => {
 
 // Xóa thông báo (Chỉ Admin)
 export const deleteNotification = async (id, token) => {
-  const response = await fetch(`${API_BASE}/noti/delete/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/noti/delete/${id}`, {
     method: "DELETE",
-    headers: withNoStore({
-      Authorization: `Bearer ${token}`,
-    }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -701,9 +790,9 @@ export const deleteNotification = async (id, token) => {
 
 // Lấy danh sách categories
 export const getCategories = async (token) => {
-  const response = await fetch(`${API_BASE}/categories`, {
+  const response = await fetchWithAuth(`${API_BASE}/categories`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -711,11 +800,10 @@ export const getCategories = async (token) => {
 
 // Thêm mới category (chỉ admin)
 export const addCategory = async (data, token) => {
-  const response = await fetch(`${API_BASE}/categories`, {
+  const response = await fetchWithAuth(`${API_BASE}/categories`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -725,11 +813,10 @@ export const addCategory = async (data, token) => {
 
 // Cập nhật category (chỉ admin)
 export const updateCategory = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/categories/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/categories/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -739,18 +826,18 @@ export const updateCategory = async (id, data, token) => {
 
 // Xóa category (chỉ admin)
 export const deleteCategory = async (id, token) => {
-  const response = await fetch(`${API_BASE}/categories/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/categories/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 // Lấy danh sách platforms
 export const getPlatforms = async (token) => {
-  const response = await fetch(`${API_BASE}/platforms`, {
+  const response = await fetchWithAuth(`${API_BASE}/platforms`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -758,11 +845,10 @@ export const getPlatforms = async (token) => {
 
 // Thêm mới platform (chỉ admin)
 export const addPlatform = async (data, token) => {
-  const response = await fetch(`${API_BASE}/platforms`, {
+  const response = await fetchWithAuth(`${API_BASE}/platforms`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -772,11 +858,10 @@ export const addPlatform = async (data, token) => {
 
 // Cập nhật platform (chỉ admin)
 export const updatePlatform = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/platforms/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/platforms/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -786,9 +871,9 @@ export const updatePlatform = async (id, data, token) => {
 
 // Xóa platform (chỉ admin)
 export const deletePlatform = async (id, token) => {
-  const response = await fetch(`${API_BASE}/platforms/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/platforms/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -799,9 +884,9 @@ export const getServerByTypeAndCategory = async (category = "", token) => {
   // if (type) queryString += `type=${encodeURIComponent(type)}&`;
   if (category) queryString += `path=${encodeURIComponent(category)}`;
 
-  const response = await fetch(`${API_BASE}/servers?${queryString}`, {
+  const response = await fetchWithAuth(`${API_BASE}/servers?${queryString}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -816,24 +901,21 @@ export const getConfigWebLogo = async () => {
   return handleResponse(response); // Xử lý phản hồi từ API
 }
 export const getConfigWeb = async (token) => {
-  const response = await fetch(`${API_BASE}/configweb`, {
+  const response = await fetchWithAuth(`${API_BASE}/configweb`, {
     method: "GET",
-    headers: withNoStore({
-      Authorization: `Bearer ${token}`, // Token để xác thực
-    }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response); // Xử lý phản hồi từ API
 };
 
 export const updateConfigWeb = async (data, token) => {
-  const response = await fetch(`${API_BASE}/configweb`, {
+  const response = await fetchWithAuth(`${API_BASE}/configweb`, {
     method: "PUT",
     headers: withNoStore({
-      "Content-Type": "application/json", // Đặt Content-Type là application/json
-      Authorization: `Bearer ${token}`, // Token để xác thực
+      "Content-Type": "application/json",
     }),
-    body: JSON.stringify(data), // Gửi dữ liệu trong body dưới dạng JSON
+    body: JSON.stringify(data),
     cache: "no-store",
   });
   return handleResponse(response); // Xử lý phản hồi từ API
@@ -841,11 +923,9 @@ export const updateConfigWeb = async (data, token) => {
 
 // Lấy cấu hình thẻ nạp
 export const getConfigCard = async (token) => {
-  const response = await fetch(`${API_BASE}/config-card`, {
+  const response = await fetchWithAuth(`${API_BASE}/config-card`, {
     method: "GET",
-    headers: withNoStore({
-      Authorization: `Bearer ${token}`, // Token để xác thực
-    }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response); // Xử lý phản hồi từ API
@@ -853,13 +933,12 @@ export const getConfigCard = async (token) => {
 
 // Cập nhật cấu hình thẻ nạp
 export const updateConfigCard = async (data, token) => {
-  const response = await fetch(`${API_BASE}/config-card`, {
+  const response = await fetchWithAuth(`${API_BASE}/config-card`, {
     method: "PUT",
     headers: withNoStore({
-      "Content-Type": "application/json", // Đặt Content-Type là application/json
-      Authorization: `Bearer ${token}`, // Token để xác thực
+      "Content-Type": "application/json",
     }),
-    body: JSON.stringify(data), // Gửi dữ liệu trong body dưới dạng JSON
+    body: JSON.stringify(data),
     cache: "no-store",
   });
   return handleResponse(response); // Xử lý phản hồi từ API
@@ -876,18 +955,18 @@ export const updateConfigCard = async (data, token) => {
 
 // Lấy danh sách dịch vụ từ SMM
 export const getServicesFromSmm = async (id, token) => {
-  const response = await fetch(`${API_BASE}/getservices/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/getservices/${id}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
 };
 // Lấy danh sách chương trình khuyến mãi
 export const getPromotions = async (token) => {
-  const response = await fetch(`${API_BASE}/promotions`, {
+  const response = await fetchWithAuth(`${API_BASE}/promotions`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -895,11 +974,10 @@ export const getPromotions = async (token) => {
 
 // Tạo mới chương trình khuyến mãi
 export const createPromotion = async (data, token) => {
-  const response = await fetch(`${API_BASE}/promotions`, {
+  const response = await fetchWithAuth(`${API_BASE}/promotions`, {
     method: "POST",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -909,11 +987,10 @@ export const createPromotion = async (data, token) => {
 
 // Cập nhật chương trình khuyến mãi
 export const updatePromotion = async (id, data, token) => {
-  const response = await fetch(`${API_BASE}/promotions/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/promotions/${id}`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
@@ -923,9 +1000,9 @@ export const updatePromotion = async (id, data, token) => {
 
 // Xóa chương trình khuyến mãi
 export const deletePromotion = async (id, token) => {
-  const response = await fetch(`${API_BASE}/promotions/${id}`, {
+  const response = await fetchWithAuth(`${API_BASE}/promotions/${id}`, {
     method: "DELETE",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -945,9 +1022,9 @@ export const getTransactions = async (token, page = 1, limit = 10, username = ""
     queryParams.append("transactionID", transactionID);
   }
 
-  const response = await fetch(`${API_BASE}/transactions?${queryParams.toString()}`, {
+  const response = await fetchWithAuth(`${API_BASE}/transactions?${queryParams.toString()}`, {
     method: "GET",
-    headers: withNoStore({ Authorization: `Bearer ${token}` }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
 
@@ -956,11 +1033,9 @@ export const getTransactions = async (token, page = 1, limit = 10, username = ""
 
 // Lấy cấu hình Telegram
 export const getConfigTele = async (token) => {
-  const response = await fetch(`${API_BASE}/configtele`, {
+  const response = await fetchWithAuth(`${API_BASE}/configtele`, {
     method: "GET",
-    headers: withNoStore({
-      Authorization: `Bearer ${token}`,
-    }),
+    headers: withNoStore({}),
     cache: "no-store",
   });
   return handleResponse(response);
@@ -968,11 +1043,10 @@ export const getConfigTele = async (token) => {
 
 // Cập nhật cấu hình Telegram
 export const updateConfigTele = async (data, token) => {
-  const response = await fetch(`${API_BASE}/configtele`, {
+  const response = await fetchWithAuth(`${API_BASE}/configtele`, {
     method: "PUT",
     headers: withNoStore({
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     }),
     body: JSON.stringify(data),
     cache: "no-store",
