@@ -406,6 +406,7 @@ exports.AddOrder = async (req, res) => {
             orderId: purchaseOrderId,
             namesv: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
             category: serviceFromDb.category.name || "Không xác định",
+            categoryid: serviceFromDb.category ? serviceFromDb.category._id : null,
             link,
             start: 0,
             quantity: qty,

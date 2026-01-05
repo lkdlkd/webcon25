@@ -37,8 +37,73 @@ export const isTokenExpired = (token) => {
   }
 };
 
+// ==================== AUTO REFRESH TOKEN SYSTEM ====================
+let refreshTimer = null;
+let isRefreshing = false;
+
+// Lấy thời gian còn lại trước khi token hết hạn (ms)
+const getTokenExpiryTime = (token) => {
+  if (!token) return 0;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    const exp = payload.exp * 1000;
+    return exp - Date.now();
+  } catch {
+    return 0;
+  }
+};
+
+// Đặt timer để tự động refresh token trước khi hết hạn
+export const scheduleTokenRefresh = (token) => {
+  // Xóa timer cũ nếu có
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+
+  const timeUntilExpiry = getTokenExpiryTime(token);
+  const refreshTime = timeUntilExpiry - 60000;
+
+  if (refreshTime > 0) {
+    refreshTimer = setTimeout(async () => {
+      if (!isRefreshing) {
+        try {
+          await refreshAccessToken();
+        } catch (error) {
+        }
+      }
+    }, refreshTime);
+  }
+};
+
+// Dừng auto-refresh (dùng khi logout)
+export const stopTokenRefresh = () => {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+};
+
 // Refresh access token (chỉ dùng để update localStorage cho AuthContext)
 export const refreshAccessToken = async () => {
+  if (isRefreshing) {
+    // Đang refresh, chờ kết quả
+    return new Promise((resolve, reject) => {
+      const checkRefresh = setInterval(() => {
+        if (!isRefreshing) {
+          clearInterval(checkRefresh);
+          const token = getStoredToken();
+          if (token && !isTokenExpired(token)) {
+            resolve(token);
+          } else {
+            reject(new Error('Refresh failed'));
+          }
+        }
+      }, 100);
+    });
+  }
+
+  isRefreshing = true;
   try {
     const response = await fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
@@ -54,38 +119,135 @@ export const refreshAccessToken = async () => {
     }
 
     const data = await response.json();
-    // Lưu vào localStorage chỉ để AuthContext decode role/username
+    // Lưu vào localStorage để AuthContext decode role/username
     setStoredToken(data.token);
+    // Lưu sessionKey cho cross-origin signature
+    if (data.sessionKey) {
+      setSessionKey(data.sessionKey);
+    }
+
+    // Đặt timer cho lần refresh tiếp theo
+    scheduleTokenRefresh(data.token);
+
     return data.token;
   } catch (error) {
     setStoredToken(null);
+    setSessionKey(null);
+    stopTokenRefresh();
     localStorage.clear();
     sessionStorage.clear();
     throw error;
+  } finally {
+    isRefreshing = false;
   }
 };
 
-// Wrapper cho fetch với cookie authentication
+// Khởi động auto-refresh khi page load (nếu đã có token)
+const initAutoRefresh = () => {
+  const token = getStoredToken();
+  if (token) {
+    if (isTokenExpired(token)) {
+      refreshAccessToken().catch(() => { });
+    } else {
+      scheduleTokenRefresh(token);
+    }
+  }
+};
+
+// Tự động khởi động khi module được load
+initAutoRefresh();
+
+// ==================== SIGNATURE GENERATION ====================
+// SessionKey được lưu trong localStorage (vì cross-origin không đọc được cookie)
+export const getSessionKey = () => localStorage.getItem('sessionKey');
+export const setSessionKey = (key) => {
+  if (key) {
+    localStorage.setItem('sessionKey', key);
+  } else {
+    localStorage.removeItem('sessionKey');
+  }
+};
+
+// Đọc cookie theo tên (backup, không dùng cho sessionKey cross-origin)
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+// Tạo random nonce để chống replay attack
+function generateNonce() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Tạo HMAC signature sử dụng Web Crypto API
+async function createSignature(payload, sessionKey) {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(sessionKey);
+  const messageData = encoder.encode(payload);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+
+  const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
+  return Array.from(new Uint8Array(signatureBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+// Wrapper cho fetch với cookie authentication và signature
 const fetchWithAuth = async (url, options = {}) => {
+  // Tạo signature headers nếu có sessionKey (đọc từ localStorage cho cross-origin)
+  const sessionKey = getSessionKey();
+  let signatureHeaders = {};
+
+  if (sessionKey) {
+    const timestamp = Date.now().toString();
+    const nonce = generateNonce();
+
+    // Lấy path từ URL (bỏ phần domain và /api prefix)
+    const urlPath = new URL(url).pathname.replace('/api', '');
+    const method = options.method || 'GET';
+
+    // Payload: timestamp:method:path:nonce
+    const payload = `${timestamp}:${method}:${urlPath}:${nonce}`;
+    const signature = await createSignature(payload, sessionKey);
+
+    signatureHeaders = {
+      'X-Timestamp': timestamp,
+      'X-Signature': signature,
+      'X-Nonce': nonce,
+    };
+  }
+
   // Token tự động gửi qua httpOnly cookie, không cần logic phức tạp
   const response = await fetch(url, {
     ...options,
     credentials: "include", // Gửi cookies tự động (accessToken + refreshToken)
     headers: {
       ...options.headers,
+      ...signatureHeaders,
     },
   });
 
-  // Nếu nhận 401, backend sẽ tự động refresh token qua cookie
-  // Nếu refresh thất bại, redirect to login
-  if (response.status === 401) {
-    const data = await response.json().catch(() => ({}));
-    if (data.error === "Token không hợp lệ hoặc đã hết hạn") {
-      // Session thực sự hết hạn, redirect
+  // Nếu nhận 401/404, kiểm tra các lỗi cần logout
+  if (response.status === 401 || response.status === 404) {
+    const data = await response.clone().json().catch(() => ({}));
+    const logoutErrors = [
+      "Token không hợp lệ hoặc đã hết hạn",
+      "Không có token, truy cập bị từ chối",
+      "Người dùng không tồn tại",
+      "Tài khoản của bạn đã bị khóa"
+    ];
+    if (logoutErrors.includes(data.error)) {
       localStorage.clear();
       sessionStorage.clear();
       window.location.href = "/dang-nhap";
-      throw new Error("Session expired");
+      throw new Error(data.error);
     }
   }
 
@@ -226,12 +388,13 @@ export const cancelScheduledOrder = async (id, token) => {
   return handleResponse(response);
 };
 
+// ==================== END SIGNATURE GENERATION ====================
+
 // Helper để thêm header Cache-Control
 const withNoStore = (headers = {}) => ({
   ...headers,
   "Cache-Control": "no-store",
-  'X-Client-Domain': window.location.host, // Gửi domain của frontend
-
+  'X-Client-Domain': window.location.host,
 });
 // Helper để xử lý response
 const handleResponse = async (response) => {
@@ -287,11 +450,25 @@ export const login = async (data) => {
     }),
     body: JSON.stringify(data),
   });
-  return handleResponse(response);
+  const result = await handleResponse(response);
+
+  // Sau khi login thành công, lưu token và schedule auto-refresh
+  if (result.token) {
+    setStoredToken(result.token);
+    if (result.sessionKey) {
+      setSessionKey(result.sessionKey);
+    }
+    scheduleTokenRefresh(result.token);
+  }
+
+  return result;
 };
 
 // Logout - Backend sẽ xóa cookies, frontend chỉ clear localStorage
 export const logout = async () => {
+  // Dừng auto-refresh timer
+  stopTokenRefresh();
+
   try {
     await fetch(`${API_BASE}/auth/logout`, {
       method: "POST",
@@ -299,7 +476,7 @@ export const logout = async () => {
       headers: withNoStore({}),
     });
   } catch (e) {
-    console.error("Logout error:", e);
+
   }
   // Clear localStorage/sessionStorage
   localStorage.clear();

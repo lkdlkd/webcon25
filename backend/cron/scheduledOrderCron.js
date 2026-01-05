@@ -270,6 +270,7 @@ async function processSingleScheduledOrder(pendingOrder) {
       orderId: purchaseOrderId,
       namesv: `${service.maychu} ${service.name}`,
       category: lockedOrder.category,
+      categoryid: service.category ? service.category._id : null,
       link: lockedOrder.link,
       start: 0,
       quantity: qty,

@@ -103,7 +103,7 @@ exports.getTransactions = async (req, res) => {
         }
 
         if ( transactions.length === 0) {
-            return res.status(404).json({ message: 'không có' });
+            return res.status(200).json(transactions=[]);
         }
 
         // Trả về kết quả

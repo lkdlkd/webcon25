@@ -53,7 +53,7 @@ async function getOrders(req, res) {
   }
 
   try {
-    let selectFields = '-SvID -orderId -DomainSmm -lai -tientieu -ordertay'; // Các trường không cần thiết cho người dùng thường
+    let selectFields = '-SvID -orderId -DomainSmm -lai -tientieu -ordertay -categoryid'; // Các trường không cần thiết cho người dùng thường
     if (user.role === 'admin') {
       selectFields = ''; // admin xem tất cả các trường
     }
@@ -68,7 +68,12 @@ async function getOrders(req, res) {
     const totalOrders = await Order.countDocuments(filter);
 
     if (orders.length === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy đơn hàng' });
+      return res.status(200).json({
+        orders: [],
+        currentPage: page,
+        totalPages: Math.ceil(totalOrders / limit),
+        totalOrders
+      });
     }
 
     // Convert DomainSmm to name string for each order
@@ -278,7 +283,7 @@ async function addOrder(req, res) {
       console.error('⚠️ Phát hiện số dư âm:', username, 'số dư:', newBalance);
       await User.findOneAndUpdate(
         { username },
-        { 
+        {
           $inc: { balance: totalCost },
           $set: { status: 'banned' }
         }
@@ -425,6 +430,7 @@ async function addOrder(req, res) {
       orderId: purchaseOrderId,
       namesv: `${serviceFromDb.maychu} ${serviceFromDb.name}`,
       category,
+      categoryid: serviceFromDb.category ? serviceFromDb.category._id : null,
       link,
       start: 0,
       quantity: qty,

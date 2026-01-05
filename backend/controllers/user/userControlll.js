@@ -50,27 +50,57 @@ async function generateRefreshToken(user, req) {
   return { token, expiresAt };
 }
 
+// Helper kiểm tra môi trường production
+// Dùng biến PRODUCTION=true hoặc check URL_WEBSITE có HTTPS không
+function isProductionMode() {
+  if (process.env.PRODUCTION === 'true') return true;
+  if (process.env.NODE_ENV === 'development') return false;
+  // Fallback: check nếu URL_WEBSITE là HTTPS thì coi là production
+  const urlWebsite = process.env.URL_WEBSITE || '';
+  return urlWebsite.startsWith('https://');
+}
+
 // Helper set cookie cho refresh token
 function setRefreshTokenCookie(res, token, expiresAt) {
+  const isProduction = isProductionMode();
   res.cookie('refreshToken', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== 'development',
-    sameSite: 'lax',          // 🔥 QUAN TRỌNG
+    secure: isProduction,           // HTTPS only in production
+    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
     expires: expiresAt,
-    path: '/api/auth/refresh' // 🔥 CHỈ đúng endpoint refresh
+    path: '/api/auth/refresh'       // CHỈ đúng endpoint refresh
   });
 }
 
 // Helper set cookie cho access token (optional - nếu muốn gửi qua cookie thay vì response body)
 function setAccessTokenCookie(res, token) {
+  const isProduction = isProductionMode();
   res.cookie('accessToken', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV !== 'development',
-    sameSite: 'lax',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
     maxAge: 10 * 60 * 1000, // 10 phút
     path: '/' // Tất cả các route
   });
 }
+
+// Tạo session key ngẫu nhiên cho HMAC signature
+function generateSessionKey() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Set cookie cho session key (non-httpOnly để frontend đọc được)
+function setSessionKeyCookie(res, sessionKey) {
+  const isProduction = isProductionMode();
+  res.cookie('sessionKey', sessionKey, {
+    httpOnly: false, // Frontend cần đọc để tạo signature
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
+    maxAge: 11 * 60 * 1000, // 11 phút
+    path: '/'
+  });
+}
+
 // Helper gửi tin nhắn Telegram
 async function sendTelegramMessage(chatId, text) {
   try {
@@ -148,6 +178,10 @@ exports.login = async (req, res) => {
     setRefreshTokenCookie(res, refreshToken, expiresAt);
     setAccessTokenCookie(res, accessToken);
 
+    // Tạo và set sessionKey cho HMAC signature
+    const sessionKey = generateSessionKey();
+    setSessionKeyCookie(res, sessionKey);
+
     // Nếu là admin, gửi thông báo Telegram
     if (user.role === 'admin') {
       const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -179,8 +213,10 @@ exports.login = async (req, res) => {
       }
     }
     // ✅ Trả về access token mới (refresh token đã được set trong cookie)
+    // Trả về sessionKey trong body để frontend lưu vào localStorage (cross-origin ko đọc được cookie)
     return res.status(200).json({
       token: accessToken,
+      sessionKey: sessionKey,  // 🔥 Thêm cho cross-origin support
       role: user.role,
       username: user.username,
       twoFactorEnabled: user.twoFactorEnabled,
@@ -211,7 +247,8 @@ exports.refreshToken = async (req, res) => {
     // Kiểm tra hết hạn
     if (tokenDoc.expiresAt < new Date()) {
       await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      res.clearCookie('refreshToken', { path: '/api/auth' });
+      const isProduction = isProductionMode();
+      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
       return res.status(401).json({ error: 'Refresh token đã hết hạn' });
     }
 
@@ -220,13 +257,15 @@ exports.refreshToken = async (req, res) => {
 
     if (!user) {
       await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      res.clearCookie('refreshToken', { path: '/api/auth' });
+      const isProduction = isProductionMode();
+      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
       return res.status(401).json({ error: 'Người dùng không tồn tại' });
     }
 
     if (user.status !== 'active') {
       await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      res.clearCookie('refreshToken', { path: '/api/auth' });
+      const isProduction = isProductionMode();
+      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
       return res.status(403).json({ error: 'Tài khoản đã bị khóa' });
     }
 
@@ -236,8 +275,13 @@ exports.refreshToken = async (req, res) => {
     // Set access token vào cookie
     setAccessTokenCookie(res, accessToken);
 
+    // Tạo và set sessionKey mới cho HMAC signature
+    const sessionKey = generateSessionKey();
+    setSessionKeyCookie(res, sessionKey);
+
     return res.status(200).json({
       token: accessToken,
+      sessionKey: sessionKey,  // 🔥 Thêm cho cross-origin support
       role: user.role,
       username: user.username,
       expiresIn: 10 * 60 // 10 phút tính bằng giây
@@ -259,8 +303,10 @@ exports.logout = async (req, res) => {
     }
 
     // Xóa cả 2 cookies
-    res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
-    res.clearCookie('accessToken', { path: '/' });
+    const isProduction = isProductionMode();
+    res.clearCookie('refreshToken', { path: '/api/auth/refresh', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
+    res.clearCookie('accessToken', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
+    res.clearCookie('sessionKey', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
 
     return res.status(200).json({ message: 'Đăng xuất thành công' });
   } catch (error) {
@@ -278,8 +324,10 @@ exports.logoutAll = async (req, res) => {
     await RefreshToken.deleteMany({ userId: currentUser._id || currentUser.userId });
 
     // Xóa cả 2 cookies hiện tại
-    res.clearCookie('refreshToken', { path: '/api/auth/refresh' });
-    res.clearCookie('accessToken', { path: '/' });
+    const isProduction = isProductionMode();
+    res.clearCookie('refreshToken', { path: '/api/auth/refresh', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
+    res.clearCookie('accessToken', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
+    res.clearCookie('sessionKey', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
 
     return res.status(200).json({ message: 'Đã đăng xuất khỏi tất cả thiết bị' });
   } catch (error) {

@@ -8,6 +8,7 @@ const orderSchema = new mongoose.Schema({
   Magoi: { type: String, required: false }, // mã gói dịch vụ
   namesv: { type: String, required: true }, // tên sv đã mua
   category: { type: String, required: true }, // loại dịch vụ đã mua
+  categoryid: { type: mongoose.Schema.Types.ObjectId, ref: "Category" }, // id loại dịch vụ đã mua
   comments: { type: String, required: false }, // cmt vụ đã mua
   link: { type: String, required: true }, // link đã mua
   start: { type: Number, default: 0 }, //  số lượng bắt đầu

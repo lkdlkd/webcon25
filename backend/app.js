@@ -47,6 +47,77 @@ const api = require('@/routes/api'); // Đường dẫn đúng đến file api.j
 const app = express();
 const noti = require('@/routes/website/notificationsRouter');
 
+// ================= Signature Verification Middleware =================
+const crypto = require('crypto');
+
+function verifySignature(req, res, next) {
+    // Cho preflight đi qua
+    if (req.method === 'OPTIONS') return next();
+
+    // Whitelist các endpoint public (login, register, refresh) - không cần signature
+    // Lưu ý: req.path không bao gồm /api vì middleware được mount tại /api
+    const publicPaths = [
+        '/login',
+        '/register',
+        '/auth/refresh',
+        '/auth/logout',
+        '/recaptcha-site-key',
+        '/configweblogo',
+    ];
+
+    // Kiểm tra nếu đường dẫn bắt đầu bằng một trong các public paths
+    const isPublicPath = publicPaths.some(path => req.path === path || req.path.startsWith(path + '/'));
+    if (isPublicPath) return next();
+
+    const timestamp = req.headers['x-timestamp'];
+    const signature = req.headers['x-signature'];
+    const nonce = req.headers['x-nonce']; // Random string để chống replay
+    const sessionKey = req.cookies?.sessionKey;
+
+    // Nếu không có sessionKey cookie → chưa đăng nhập → cho qua (authenticate middleware sẽ chặn)
+    if (!sessionKey) return next();
+
+    // Nếu có sessionKey nhưng thiếu signature → reject
+    if (!timestamp || !signature || !nonce) {
+        return res.status(403).json({
+            success: false,
+            message: 'Thiếu thông tin xác thực'
+        });
+    }
+
+    // Kiểm tra timestamp (chỉ cho phép request trong 30 giây - giảm từ 60s)
+    const now = Date.now();
+    const requestTime = parseInt(timestamp, 10);
+    if (isNaN(requestTime) || Math.abs(now - requestTime) > 30000) {
+        return res.status(403).json({
+            success: false,
+            message: 'Request đã hết hạn'
+        });
+    }
+
+    // Lấy path từ originalUrl, bỏ prefix /api để match với frontend
+    const fullPath = req.originalUrl.split('?')[0]; // Bỏ query string
+    const apiPath = fullPath.replace(/^\/api/, ''); // Bỏ /api prefix
+
+    // Tạo payload bao gồm: timestamp + method + path + nonce
+    const payload = `${timestamp}:${req.method}:${apiPath}:${nonce}`;
+
+    // Verify signature
+    const expectedSignature = crypto
+        .createHmac('sha256', sessionKey)
+        .update(payload)
+        .digest('hex');
+
+    if (signature !== expectedSignature) {
+        return res.status(403).json({
+            success: false,
+            message: 'Không hợp lệ'
+        });
+    }
+
+    next();
+}
+
 // ================= Rate Limiting - Chống spam API =================
 // Rate limiter chung cho tất cả API
 const generalLimiter = rateLimit({
@@ -115,16 +186,72 @@ const corsOptions = {
 };
 
 
-// Áp dụng rate limiting
-app.use('/api/v2', apiV2Limiter); // Rate limit cho API v2
-app.get('/api/v2', (req, res) => {
-    res.send('Vui lòng sử dụng post /api/v2 để truy cập API');
+// ================= API v2 - Public API (cho phép gọi từ bất kỳ nguồn nào) =================
+const apiv2Controller = require('@/controllers/document/apiController');
+const blockedIPs = new Map();
+
+const apiV2DetectSpam = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 200, // 200 requests mỗi phút
+    standardHeaders: true,
+    legacyHeaders: false,
+
+    handler: (req, res) => {
+        blockedIPs.set(req.ip, Date.now() + 5 * 60 * 1000);
+        return res.status(429).json({
+            success: false,
+            message: 'IP đã bị chặn 5 phút do spam'
+        });
+    }
 });
+
+
+// middleware check block
+function checkBlocked(req, res, next) {
+    const until = blockedIPs.get(req.ip);
+
+    if (until) {
+        if (Date.now() < until) {
+            return res.status(429).json({
+                success: false,
+                message: 'IP đang bị chặn tạm thời'
+            });
+        }
+        // Hết thời gian block → xóa
+        blockedIPs.delete(req.ip);
+    }
+
+    next();
+}
+
+
+// CORS mở cho API v2 - cho phép tất cả origins
+const corsV2Options = {
+    origin: '*', // Cho phép tất cả origins
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false // Không cần credentials cho public API
+};
+app.post(
+    '/api/v2',
+    cors(corsV2Options),
+    checkBlocked, // phát hiện spam
+    apiV2DetectSpam,// block 5 phút
+    apiv2Controller.routeRequest
+);
+
+// Route API v2 - chỉ có rate limiting, không có allowFrontendOnly hay verifySignature
+app.get('/api/v2', checkBlocked, apiV2DetectSpam, (req, res) => {
+    res.send('Vui lòng sử dụng POST /api/v2 để truy cập API');
+});
+
+// ================= API chính - Chỉ cho phép từ frontend =================
 // Sử dụng routes cho API
 app.use(
     '/api',
     allowFrontendOnly,
     cors(corsOptions),
+    verifySignature,
     generalLimiter,
     api
 );
@@ -133,6 +260,7 @@ app.use(
     '/api/noti',
     allowFrontendOnly,
     cors(corsOptions),
+    // verifySignature đã được apply ở /api route
     generalLimiter,
     noti
 );

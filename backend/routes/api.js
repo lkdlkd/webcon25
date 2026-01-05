@@ -10,7 +10,6 @@ const { addOrder, deleteOrder, getOrders } = require('@/controllers/order/orderC
 const { updateOrderStatus } = require('@/controllers/order/orderController');
 const card = require('@/controllers/thecao/CardController');
 const server = require('@/controllers/server/ServerController');
-const apiv2 = require('@/controllers/document/apiController'); // Đường dẫn đúng đến apiController
 const banking = require('../controllers/Banking/BankingController'); // Đường dẫn đúng đến bankingController
 const catagory = require('@/controllers/server/CatagoryController'); // Đường dẫn đúng đến CatagoryController
 const platform = require('@/controllers/server/PlatformController'); // Đường dẫn đúng đến PlatformController
@@ -55,11 +54,6 @@ const WebLimiter = rateLimit({
   max: 30, // 30 đơn / phút
   message: { error: 'Bạn thao tác quá nhanh với đơn hàng' }
 });
-const apiV2Limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100, // 100 requests / phút
-  message: { error: 'Vượt quá giới hạn API' }
-});
 
 
 // Route lấy site key với rate-limit
@@ -78,8 +72,6 @@ router.post('/2fa/disable', orderLimiter, authenticate.authenticateUser, user.di
 
 // banking
 router.get('/banking', authenticate.authenticateUser, banking.getBank); // ok Lấy thông tin ngân hàng của người dùng 
-// api v2
-router.post('/v2', apiV2Limiter, apiv2.routeRequest); // ok Tất cả các yêu cầu POST tới endpoint này sẽ được chuyển qua hàm routeRequest
 //thecao 
 router.post('/thecao/recharge', WebLimiter, authenticate.authenticateUser, card.createTransaction); // ok Nạp thẻ cào
 router.get('/thecao', authenticate.authenticateUser, card.getCard); // ok Lấy  chiết khấu thẻ cào
