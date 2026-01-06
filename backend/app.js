@@ -43,6 +43,7 @@ require('@/controllers/tool/autoDeleteOldData'); // Cronjob tự động xóa d�
 require('@/controllers/tool/syncServicesFromSmm'); // Cronjob tự động đồng bộ services từ SMM API (chạy mỗi 6 giờ)
 const cors = require('cors');
 const cookieParser = require('cookie-parser'); // Thêm cookie-parser
+const multer = require('multer'); // Parse form-data
 const api = require('@/routes/api'); // Đường dẫn đúng đến file api.js
 const app = express();
 const noti = require('@/routes/website/notificationsRouter');
@@ -230,11 +231,22 @@ const corsV2Options = {
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: false // Không cần credentials cho public API
 };
+// Multer middleware để parse form-data (chỉ text fields, không cho phép file)
+const parseFormData = multer().none();
+
+// Middleware merge query params vào body (query có độ ưu tiên thấp hơn body)
+function mergeParamsToBody(req, res, next) {
+    req.body = { ...req.query, ...req.body };
+    next();
+}
+
 app.post(
     '/api/v2',
     cors(corsV2Options),
     checkBlocked, // phát hiện spam
     apiV2DetectSpam,// block 5 phút
+    parseFormData, // Parse form-data và x-www-form-urlencoded
+    mergeParamsToBody, // Merge query params vào body
     apiv2Controller.routeRequest
 );
 
