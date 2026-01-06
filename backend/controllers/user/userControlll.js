@@ -7,11 +7,9 @@ const Telegram = require('../../models/Telegram');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const Order = require('../../models/Order');
-const RefreshToken = require('../../models/RefreshToken');
 
-// Cấu hình token
-const ACCESS_TOKEN_EXPIRES = '10m'; // Access token hết hạn sau 10 phút
-const REFRESH_TOKEN_EXPIRES_DAYS = 30; // Refresh token hết hạn sau 30 ngày
+// Cấu hình token - access token dài hạn 30 ngày
+const ACCESS_TOKEN_EXPIRES = '30d';
 
 // Helper tạo access token
 function generateAccessToken(user) {
@@ -22,83 +20,9 @@ function generateAccessToken(user) {
   );
 }
 
-// Helper tạo refresh token và lưu vào DB
-async function generateRefreshToken(user, req) {
-  const token = crypto.randomBytes(64).toString('hex');
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
-
-  const ip = req.headers['x-user-ip'] ||
-    (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-    req.connection.remoteAddress || null;
-  const userAgent = req.headers['user-agent'] || '';
-
-  // Xóa các refresh token cũ của user (giữ tối đa 5 session)
-  const existingTokens = await RefreshToken.find({ userId: user._id }).sort({ createdAt: -1 });
-  if (existingTokens.length >= 5) {
-    const tokensToDelete = existingTokens.slice(4).map(t => t._id);
-    await RefreshToken.deleteMany({ _id: { $in: tokensToDelete } });
-  }
-
-  await RefreshToken.create({
-    token,
-    userId: user._id,
-    expiresAt,
-    userAgent,
-    ip
-  });
-
-  return { token, expiresAt };
-}
-
-// Helper kiểm tra môi trường production
-// Dùng biến PRODUCTION=true hoặc check URL_WEBSITE có HTTPS không
-function isProductionMode() {
-  if (process.env.PRODUCTION === 'true') return true;
-  if (process.env.NODE_ENV === 'development') return false;
-  // Fallback: check nếu URL_WEBSITE là HTTPS thì coi là production
-  const urlWebsite = process.env.URL_WEBSITE || '';
-  return urlWebsite.startsWith('https://');
-}
-
-// Helper set cookie cho refresh token
-function setRefreshTokenCookie(res, token, expiresAt) {
-  const isProduction = isProductionMode();
-  res.cookie('refreshToken', token, {
-    httpOnly: true,
-    secure: isProduction,           // HTTPS only in production
-    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
-    expires: expiresAt,
-    path: '/api/auth/refresh'       // CHỈ đúng endpoint refresh
-  });
-}
-
-// Helper set cookie cho access token (optional - nếu muốn gửi qua cookie thay vì response body)
-function setAccessTokenCookie(res, token) {
-  const isProduction = isProductionMode();
-  res.cookie('accessToken', token, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
-    maxAge: 10 * 60 * 1000, // 10 phút
-    path: '/' // Tất cả các route
-  });
-}
-
 // Tạo session key ngẫu nhiên cho HMAC signature
 function generateSessionKey() {
   return crypto.randomBytes(32).toString('hex');
-}
-
-// Set cookie cho session key (non-httpOnly để frontend đọc được)
-function setSessionKeyCookie(res, sessionKey) {
-  const isProduction = isProductionMode();
-  res.cookie('sessionKey', sessionKey, {
-    httpOnly: false, // Frontend cần đọc để tạo signature
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax', // 🔥 'none' cho cross-origin
-    maxAge: 11 * 60 * 1000, // 11 phút
-    path: '/'
-  });
 }
 
 // Helper gửi tin nhắn Telegram
@@ -168,19 +92,11 @@ exports.login = async (req, res) => {
     user.loginHistory.push({ ip, agent: userAgent, time: new Date() });
     await user.save();
 
-    // Tạo access token (ngắn hạn)
+    // Tạo access token (dài hạn 30 ngày)
     const accessToken = generateAccessToken(user);
 
-    // Tạo refresh token (dài hạn) và lưu vào DB
-    const { token: refreshToken, expiresAt } = await generateRefreshToken(user, req);
-
-    // Set cả 2 tokens vào httpOnly cookie
-    setRefreshTokenCookie(res, refreshToken, expiresAt);
-    setAccessTokenCookie(res, accessToken);
-
-    // Tạo và set sessionKey cho HMAC signature
+    // Tạo sessionKey cho HMAC signature (trả về trong body, không dùng cookie)
     const sessionKey = generateSessionKey();
-    setSessionKeyCookie(res, sessionKey);
 
     // Nếu là admin, gửi thông báo Telegram
     if (user.role === 'admin') {
@@ -212,15 +128,14 @@ exports.login = async (req, res) => {
         }
       }
     }
-    // ✅ Trả về access token mới (refresh token đã được set trong cookie)
-    // Trả về sessionKey trong body để frontend lưu vào localStorage (cross-origin ko đọc được cookie)
+    // ✅ Trả về token và sessionKey trong body (frontend lưu vào localStorage)
     return res.status(200).json({
       token: accessToken,
-      sessionKey: sessionKey,  // 🔥 Thêm cho cross-origin support
+      sessionKey: sessionKey,
       role: user.role,
       username: user.username,
       twoFactorEnabled: user.twoFactorEnabled,
-      expiresIn: 10 * 60 // 10 phút tính bằng giây
+      expiresIn: 30 * 24 * 60 * 60 // 30 ngày tính bằng giây
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -228,113 +143,6 @@ exports.login = async (req, res) => {
   }
 };
 
-// Refresh token - tạo access token mới từ refresh token trong cookie
-exports.refreshToken = async (req, res) => {
-  try {
-    const refreshToken = req.cookies?.refreshToken;
-
-    if (!refreshToken) {
-      return res.status(401).json({ error: 'Không tìm thấy refresh token' });
-    }
-
-    // Tìm refresh token trong DB
-    const tokenDoc = await RefreshToken.findOne({ token: refreshToken });
-
-    if (!tokenDoc) {
-      return res.status(401).json({ error: 'Refresh token không hợp lệ' });
-    }
-
-    // Kiểm tra hết hạn
-    if (tokenDoc.expiresAt < new Date()) {
-      await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      const isProduction = isProductionMode();
-      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-      return res.status(401).json({ error: 'Refresh token đã hết hạn' });
-    }
-
-    // Tìm user
-    const user = await User.findById(tokenDoc.userId);
-
-    if (!user) {
-      await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      const isProduction = isProductionMode();
-      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-      return res.status(401).json({ error: 'Người dùng không tồn tại' });
-    }
-
-    if (user.status !== 'active') {
-      await RefreshToken.deleteOne({ _id: tokenDoc._id });
-      const isProduction = isProductionMode();
-      res.clearCookie('refreshToken', { path: '/api/auth', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-      return res.status(403).json({ error: 'Tài khoản đã bị khóa' });
-    }
-
-    // Tạo access token mới
-    const accessToken = generateAccessToken(user);
-
-    // Set access token vào cookie
-    setAccessTokenCookie(res, accessToken);
-
-    // Tạo và set sessionKey mới cho HMAC signature
-    const sessionKey = generateSessionKey();
-    setSessionKeyCookie(res, sessionKey);
-
-    return res.status(200).json({
-      token: accessToken,
-      sessionKey: sessionKey,  // 🔥 Thêm cho cross-origin support
-      role: user.role,
-      username: user.username,
-      expiresIn: 10 * 60 // 10 phút tính bằng giây
-    });
-  } catch (error) {
-    console.error("Refresh token error:", error);
-    return res.status(500).json({ error: "Có lỗi xảy ra khi làm mới token" });
-  }
-};
-
-// Logout - xóa refresh token
-exports.logout = async (req, res) => {
-  try {
-    const refreshToken = req.cookies?.refreshToken;
-
-    if (refreshToken) {
-      // Xóa refresh token khỏi DB
-      await RefreshToken.deleteOne({ token: refreshToken });
-    }
-
-    // Xóa cả 2 cookies
-    const isProduction = isProductionMode();
-    res.clearCookie('refreshToken', { path: '/api/auth/refresh', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-    res.clearCookie('accessToken', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-    res.clearCookie('sessionKey', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-
-    return res.status(200).json({ message: 'Đăng xuất thành công' });
-  } catch (error) {
-    console.error("Logout error:", error);
-    return res.status(500).json({ error: "Có lỗi xảy ra khi đăng xuất" });
-  }
-};
-
-// Logout tất cả các thiết bị - xóa tất cả refresh token của user
-exports.logoutAll = async (req, res) => {
-  try {
-    const currentUser = req.user;
-
-    // Xóa tất cả refresh token của user
-    await RefreshToken.deleteMany({ userId: currentUser._id || currentUser.userId });
-
-    // Xóa cả 2 cookies hiện tại
-    const isProduction = isProductionMode();
-    res.clearCookie('refreshToken', { path: '/api/auth/refresh', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-    res.clearCookie('accessToken', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-    res.clearCookie('sessionKey', { path: '/', sameSite: isProduction ? 'none' : 'lax', secure: isProduction });
-
-    return res.status(200).json({ message: 'Đã đăng xuất khỏi tất cả thiết bị' });
-  } catch (error) {
-    console.error("Logout all error:", error);
-    return res.status(500).json({ error: "Có lỗi xảy ra khi đăng xuất" });
-  }
-};
 
 // Bắt đầu thiết lập 2FA: tạo secret tạm & trả về QR code + otpauth URL
 exports.setup2FA = async (req, res) => {

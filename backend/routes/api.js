@@ -16,7 +16,6 @@ const platform = require('@/controllers/server/PlatformController'); // Đườn
 const configwebController = require("../controllers/website/ConfigwebController");
 const configCardController = require("../controllers/website/configCardController");
 const { createPromotion, updatePromotion, deletePromotion, getPromotions } = require('../controllers/Khuyenmai/KhuyenmaiController');
-// const Home = require("../controllers/website/Home");
 const rateLimit = require('express-rate-limit');
 
 const scheduledController = require('@/controllers/order/scheduledController');
@@ -27,7 +26,6 @@ const captchaController = require('@/controllers/captcha/captchaController'); //
 
 const refund = require('@/controllers/order/refundController');
 const chatController = require('../controllers/chat/chatController');
-// router.get('/home', authenticate.authenticateUser, Home.getHomeOverview);
 router.get('/refund', authenticate.authenticateAdmin, refund.getRefunds);
 router.post('/refund/approve', authenticate.authenticateAdmin, refund.adminApproveRefund);
 router.delete('/refund', authenticate.authenticateAdmin, refund.adminDeleteRefunds);
@@ -60,10 +58,6 @@ const WebLimiter = rateLimit({
 router.get('/recaptcha-site-key', recaptchaLimiter, captchaController.getSiteKey);
 router.post('/login', recaptchaLimiter, user.login);//ok
 router.post('/register', recaptchaLimiter, user.register);//ok
-// Auth routes - refresh token và logout
-router.post('/auth/refresh', recaptchaLimiter, user.refreshToken); // Refresh access token
-router.post('/auth/logout', recaptchaLimiter, user.logout); // Logout (xóa refresh token)
-router.post('/auth/logout-all', recaptchaLimiter, authenticate.authenticateUser, user.logoutAll); // Logout tất cả thiết bị
 // 2FA routes
 router.post('/2fa/setup', orderLimiter, authenticate.authenticateUser, user.setup2FA); // Tạo secret tạm & QR
 router.post('/2fa/verify', orderLimiter, authenticate.authenticateUser, user.verify2FA); // Xác minh & bật 2FA

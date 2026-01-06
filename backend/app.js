@@ -59,8 +59,6 @@ function verifySignature(req, res, next) {
     const publicPaths = [
         '/login',
         '/register',
-        '/auth/refresh',
-        '/auth/logout',
         '/recaptcha-site-key',
         '/configweblogo',
     ];
