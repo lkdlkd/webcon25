@@ -22,6 +22,8 @@ exports.getConfigweb = async (req, res) => {
         deleteUsers: false,
         deleteHistory: false,
         autoDeleteMonths: 3,
+        tigia: 25000,
+        notenaptien: "",
         headerJs: "",
         footerJs: "",
         lienhe: [
@@ -50,6 +52,8 @@ exports.getConfigweb = async (req, res) => {
       domain: config.domain,
       headerJs: config.headerJs,
       footerJs: config.footerJs,
+      tigia: config.tigia,
+      notenaptien: config.notenaptien,
     };
 
     // Chỉ hiển thị viewluotban nếu user là admin
@@ -95,6 +99,8 @@ exports.getConfigwebLogo = async (req, res) => {
         autoDeleteMonths: 3,
         headerJs: "",
         footerJs: "",
+        tigia: 25000,
+        notenaptien: "",
         lienhe: [
           {
             type: "",
@@ -110,6 +116,7 @@ exports.getConfigwebLogo = async (req, res) => {
     // Chuẩn bị dữ liệu trả về
     const responseData = {
       logo: config.logo,
+      tigia: config.tigia,
     };
 
     res.status(200).json({ success: true, data: responseData });
@@ -125,7 +132,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -158,6 +165,8 @@ exports.updateConfigweb = async (req, res) => {
     config.deleteHistory = deleteHistory !== undefined ? deleteHistory : config.deleteHistory || false; // Kiểm tra giá trị trống cho deleteHistory
     config.headerJs = req.body.headerJs !== undefined ? req.body.headerJs : config.headerJs || "";
     config.footerJs = req.body.footerJs !== undefined ? req.body.footerJs : config.footerJs || "";
+    config.tigia = tigia !== undefined ? tigia : 25000;
+    config.notenaptien = notenaptien !== undefined ? notenaptien : "";
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });

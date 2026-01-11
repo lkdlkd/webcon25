@@ -18,6 +18,8 @@ const configwebSchema = new mongoose.Schema({
   deleteHistory: { type: Boolean, default: false }, // xóa lịch sử
   headerJs: { type: String, default: "" }, // mã js header
   footerJs: { type: String, default: "" }, // mã js footer
+  tigia: { type: Number, default: 25000 }, // tỷ giá
+  notenaptien: { type: String, default: "" }, // ghi chú nạp tiền
   lienhe: [
     {
       type: { type: String, default: "" },

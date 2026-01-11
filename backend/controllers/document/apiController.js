@@ -1,5 +1,4 @@
 const axios = require('axios');
-const jwt = require('jsonwebtoken');
 const Service = require('../../models/server');
 const Order = require('../../models/Order');
 const HistoryUser = require('../../models/History');
@@ -8,6 +7,7 @@ const SmmSv = require("../../models/SmmSv");
 const SmmApiService = require('../Smm/smmServices'); // Giả sử bạn có một lớp để xử lý API SMM
 const Telegram = require('../../models/Telegram');
 const Counter = require('../../models/Counter');
+const Configweb = require('../../models/Configweb');
 // Helper: lấy đơn giá theo cấp bậc user
 function getEffectiveRate(service, user) {
     try {
@@ -53,8 +53,8 @@ exports.getServiceswebcon = async (req, res) => {
         }
         // Lấy danh sách dịch vụ từ CSDL
         const services = await Service.find()
-            .populate("category", "name path thutu")
-            .populate("type", "name thutu"); // Lấy thông tin của Platform
+            .populate("category", "name path thutu notes modal_show status")
+            .populate("type", "name thutu status"); // Lấy thông tin của Platform
         // Định dạng các trường cần hiển thị với giá theo cấp bậc
         const formattedServices = services.map(service => {
             const rateForUser = getEffectiveRate(service, user);
@@ -63,7 +63,13 @@ exports.getServiceswebcon = async (req, res) => {
                 name: service.name,
                 type: service.comment === "on" ? "Custom Comments" : "Default",
                 platform: service.type?.name || "không xác định",
+                thututype: service.type?.thutu || 0,
+                statustype: service.type?.status || true,
                 category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
+                thutucategory: service.category?.thutu || 0,
+                notecategory: service.category?.notes || "",
+                modal_show: service.category?.modal_show || "",
+                statuscategory: service.category?.status || true,
                 rate: rateForUser,
                 description: service.description || "",
                 min: service.min,
@@ -77,8 +83,6 @@ exports.getServiceswebcon = async (req, res) => {
                 getid: service.getid === "on",
                 comment: service.comment === "on",
                 path: service.category?.path || "",
-                thutucategory: service.category?.thutu || 0,
-                thututype: service.type?.thutu || 0,
                 isActive: service.isActive || false,
                 status: service.status || true,
             };
@@ -121,6 +125,8 @@ exports.getServices = async (req, res) => {
         if (user.status && user.status !== 'active') {
             return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
         }
+        const config = await Configweb.findOne({});
+        const tigia = config ? config.tigia : 25000;
         // Lấy danh sách dịch vụ từ CSDL
         const services = await Service.find({ isActive: true })
             .populate("category", "name")
@@ -134,7 +140,7 @@ exports.getServices = async (req, res) => {
                 type: service.comment === "on" ? "Custom Comments" : "Default",
                 platform: service.type?.name || "không xác định",
                 category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
-                rate: rateForUser / 25,
+                rate: rateForUser / (tigia / 1000), // Chia tỷ giá để ra giá theo 1000 đơn vị
                 min: service.min,
                 max: service.max,
                 cancel: service.cancel === "on",
@@ -258,7 +264,7 @@ exports.AddOrder = async (req, res) => {
             console.error('⚠️ Phát hiện số dư âm:', username, 'số dư:', newBalance);
             await User.findOneAndUpdate(
                 { username },
-                { 
+                {
                     $inc: { balance: totalCost },
                     $set: { status: 'banned' }
                 }
@@ -575,6 +581,7 @@ exports.getOrderStatus = async (req, res) => {
         } else {
             return res.status(400).json({ error: "Danh sách đơn hàng không được bỏ trống" });
         }
+        const config = await Configweb.findOne({});
 
         // Lấy các đơn hàng từ DB
         const orderDocs = await Order.find({
@@ -587,7 +594,7 @@ exports.getOrderStatus = async (req, res) => {
             orderDocs.forEach(order => {
                 if (order.username === user.username) {
                     formattedOrders[order.Madon] = {
-                        charge: order.totalCost / 25000,
+                        charge: order.totalCost / (config ? config.tigia : 25000),
                         start_count: order.start,
                         status: order.status,
                         remains: order.quantity - order.dachay,
@@ -608,7 +615,7 @@ exports.getOrderStatus = async (req, res) => {
             let formattedOrder;
             if (firstOrder.username === user.username) {
                 formattedOrder = {
-                    charge: firstOrder.totalCost / 25000,
+                    charge: firstOrder.totalCost / (config ? config.tigia : 25000),
                     start_count: firstOrder.start,
                     status: firstOrder.status,
                     remains: firstOrder.quantity - firstOrder.dachay,
@@ -1013,9 +1020,11 @@ exports.getme = async (req, res) => {
         if (user.status && user.status !== 'active') {
             return res.status(403).json({ error: "Người dùng không hoạt động" });
         }
+        const config = await Configweb.findOne({});
+
         // Định dạng các trường cần hiển thị (có thể điều chỉnh theo yêu cầu)
         const userForm = {
-            balance: user.balance / 25000,
+            balance: user.balance / (config ? config.tigia : 25000),
             currency: "USD",
             // Các trường khác nếu cần
         };

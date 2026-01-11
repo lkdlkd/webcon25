@@ -94,7 +94,7 @@ function normalizePlatformName(name) {
 /**
  * Tìm hoặc tạo Platform (với cache)
  */
-async function findOrCreatePlatform(platformName, thututype) {
+async function findOrCreatePlatform(platformName, thututype, statustype) {
     const normalizedName = platformName;
 
     // Kiểm tra cache trước
@@ -104,11 +104,39 @@ async function findOrCreatePlatform(platformName, thututype) {
 
     let platform = await Platform.findOne({ name: normalizedName });
 
-    if (!platform) {
+    if (platform) {
+        // Kiểm tra và cập nhật nếu có thay đổi
+        let hasChanges = false;
+        const newThutu = thututype || 4;
+
+
+        if (Number(platform.thutu) !== Number(newThutu)) {
+            console.log(`🔄 Thứ tự thay đổi cho Platform ${normalizedName}: ${platform.thutu} -> ${newThutu}`);
+            platform.thutu = newThutu;
+            hasChanges = true;
+        }
+        if(platform.name !== normalizedName){
+            console.log(`🔄 Tên thay đổi cho Platform ${normalizedName}: ${platform.name} -> ${normalizedName}`);
+            platform.name = normalizedName;
+            hasChanges = true;
+        }
+        // Đảm bảo status luôn là true (platform luôn active khi có trong API)
+        if (platform.status !== true) {
+            console.log(`🔄 Status thay đổi cho Platform ${normalizedName}: ${platform.status} -> true`);
+            platform.status = true;
+            hasChanges = true;
+        }
+
+        if (hasChanges) {
+            await platform.save();
+            platformCache.set(normalizedName, platform);
+            console.log(`🔄 Cập nhật Platform: ${normalizedName}`);
+        }
+    } else {
         platform = await Platform.create({
             name: normalizedName,
             logo: PLATFORM_LOGOS[normalizedName] || "https://via.placeholder.com/50",
-            status: true,
+            status: statustype !== undefined ? (statustype === true || statustype === "on") : true,
             thutu: thututype || 4,
         });
         console.log(`✅ Tạo mới Platform: ${normalizedName}`);
@@ -122,7 +150,7 @@ async function findOrCreatePlatform(platformName, thututype) {
 /**
  * Tìm hoặc tạo Category (với cache)
  */
-async function findOrCreateCategory(categoryName, platformId, pathFromApi, thutucategory) {
+async function findOrCreateCategory(categoryName, platformId, pathFromApi, thutucategory, statuscategory, notecategory, modal_show) {
     // Tách category name từ format "PLATFORM | CATEGORY"
     const parts = categoryName.split("|");
     const cleanCategoryName = parts.length > 1 ? parts[1].trim() : categoryName.trim();
@@ -149,13 +177,65 @@ async function findOrCreateCategory(categoryName, platformId, pathFromApi, thutu
         platforms_id: platformId
     });
 
-    if (!category) {
+    if (category) {
+        // Kiểm tra và cập nhật nếu có thay đổi
+        let hasChanges = false;
+        const newThutu = thutucategory || 4;
+        const newStatus = statuscategory !== undefined ? (statuscategory === true || statuscategory === "on") : true;
+        const newNotes = notecategory || "";
+        const newModalShow = modal_show || "";
+
+        if (category.name !== cleanCategoryName) {
+            console.log(`🔄 Tên thay đổi cho Category ${path}: "${category.name}" -> "${cleanCategoryName}"`);
+            category.name = cleanCategoryName;
+            hasChanges = true;
+        }
+
+        if (Number(category.thutu) !== Number(newThutu)) {
+            console.log(`🔄 Thứ tự thay đổi cho Category ${cleanCategoryName}: ${category.thutu} -> ${newThutu}`);
+            category.thutu = newThutu;
+            hasChanges = true;
+        }
+
+        if (category.status !== newStatus) {
+            console.log(`🔄 Status thay đổi cho Category ${cleanCategoryName}: ${category.status} -> ${newStatus}`);
+            category.status = newStatus;
+            hasChanges = true;
+        }
+
+        if (String(category.notes || '') !== String(newNotes)) {
+            console.log(`🔄 Notes thay đổi cho Category ${cleanCategoryName}`);
+            category.notes = newNotes;
+            hasChanges = true;
+        }
+
+        if (String(category.modal_show || '') !== String(newModalShow)) {
+            console.log(`🔄 Modal_show thay đổi cho Category ${cleanCategoryName}`);
+            category.modal_show = newModalShow;
+            hasChanges = true;
+        }
+
+        // Đảm bảo platformId đúng
+        if (category.platforms_id.toString() !== platformId.toString()) {
+            console.log(`🔄 Platform thay đổi cho Category ${cleanCategoryName}: ${category.platforms_id} -> ${platformId}`);
+            category.platforms_id = platformId;
+            hasChanges = true;
+        }
+
+        if (hasChanges) {
+            await category.save();
+            categoryCache.set(cacheKey, category);
+            console.log(`🔄 Cập nhật Category: ${cleanCategoryName} (path: ${path})`);
+        }
+    } else {
         category = await Category.create({
             platforms_id: platformId,
             name: cleanCategoryName,
             path: path,
-            status: true,
-            thutu: thutucategory || 4
+            status: statuscategory !== undefined ? (statuscategory === true || statuscategory === "on") : true,
+            thutu: thutucategory || 4,
+            notes: notecategory || "",
+            modal_show: modal_show || ""
         });
         console.log(`✅ Tạo mới Category: ${cleanCategoryName} (path: ${path})`);
     }
@@ -219,26 +299,45 @@ async function findOrCreateService(serviceData, smmSvId, platformId, categoryId)
             hasChanges = true;
         }
 
-        // Chuẩn bị dữ liệu mới
+        // Chuẩn bị dữ liệu mới với tất cả các trường
         const newData = {
             serviceName: serviceData.name,
             name: serviceData.name,
             tocdodukien: serviceData.tocdodukien || "",
             luotban: Number(serviceData.luotban) || 0,
+            maychu: serviceData.maychu || "",
+            thutu: serviceData.thutu ? String(serviceData.thutu) : "4",
             getid: (serviceData.getid === true || serviceData.getid === "on") ? "on" : "off",
             comment: (serviceData.comment === true || serviceData.comment === "on") ? "on" : "off",
             description: serviceData.description || "",
-            maychu: serviceData.maychu || "",            
-            min: serviceData.min,
-            max: serviceData.max,
+            min: Number(serviceData.min),
+            max: Number(serviceData.max),
             cancel: serviceData.cancel ? "on" : "off",
             refil: serviceData.refill ? "on" : "off",
-            isActive: serviceData.isActive === true || serviceData.isActive === "on" ? true : false
+            isActive: serviceData.isActive === true || serviceData.isActive === "on" ? true : false,
+            status: serviceData.status === true || serviceData.status === "on" ? true : false
         };
 
         // So sánh và cập nhật nếu có thay đổi
         for (const [key, value] of Object.entries(newData)) {
-            if (service[key] !== value) {
+            // Chuyển đổi giá trị hiện tại về cùng kiểu để so sánh chính xác
+            let currentValue = service[key];
+            let newValue = value;
+
+            // Xử lý đặc biệt cho số
+            if (key === 'min' || key === 'max') {
+                currentValue = Number(currentValue);
+                newValue = Number(newValue);
+            }
+
+            // Xử lý đặc biệt cho string
+            if (typeof newValue === 'string') {
+                currentValue = String(currentValue || '');
+                newValue = String(newValue || '');
+            }
+
+            if (currentValue !== newValue) {
+                console.log(`🔄 Thay đổi ${key} cho ${service.name}: "${currentValue}" -> "${newValue}"`);
                 service[key] = value;
                 hasChanges = true;
             }
@@ -432,7 +531,8 @@ async function syncServicesFromSmmSource(smmSv) {
                 // 1. Tìm hoặc tạo Platform
                 const platform = await findOrCreatePlatform(
                     serviceData.platform,
-                    serviceData.thututype
+                    serviceData.thututype,
+                    serviceData.statustype
                 );
 
                 // 2. Tìm hoặc tạo Category (sử dụng path từ API)
@@ -440,7 +540,10 @@ async function syncServicesFromSmmSource(smmSv) {
                     serviceData.category,
                     platform._id,
                     serviceData.path,
-                    serviceData.thutucategory
+                    serviceData.thutucategory,
+                    serviceData.statuscategory,
+                    serviceData.notecategory,
+                    serviceData.modal_show
                 );
 
                 // 3. Tìm hoặc tạo Service
