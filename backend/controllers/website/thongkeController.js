@@ -140,7 +140,7 @@ exports.getStatistics = async (req, res) => {
         let revenueAgg = await Order.aggregate([
             {
                 $match: {
-                    status: { $in: ["running", "In progress", "Processing", "Pending", "Completed", "Partial" , "Canceled"] },
+                    status: { $in: ["running", "In progress", "Processing", "Pending", "Completed", "Partial", "Canceled"] },
                     createdAt: { $gte: doanhthuTime.start, $lte: doanhthuTime.end }
                 }
             },
@@ -282,11 +282,13 @@ exports.getStatistics = async (req, res) => {
         // Đếm số đơn tạo và tổng tiền mỗi ngày
         const dailyOrders = await Order.aggregate([
             { $match: chartMatch },
-            { $group: { 
-                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Ho_Chi_Minh" } },
-                count: { $sum: 1 },
-                total: { $sum: "$totalCost" }
-            } },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Ho_Chi_Minh" } },
+                    count: { $sum: 1 },
+                    total: { $sum: "$totalCost" }
+                }
+            },
             { $sort: { _id: 1 } }
         ]);
         // Lấy dailyPartial và dailyCanceled từ bảng HistoryUser, join với Order để xác định trạng thái
@@ -299,7 +301,7 @@ exports.getStatistics = async (req, res) => {
         // Lấy trạng thái các mã đơn liên quan
         const madonList = allRefunds.map(r => r.madon);
         // Tìm theo cả madon và Magoi (nhiều hệ thống lưu mã đơn ở 2 trường khác nhau)
-        const orderStatusList = await Order.find({ $or: [ { Madon: { $in: madonList } } ] }, { Madon: 1, status: 1 });
+        const orderStatusList = await Order.find({ $or: [{ Madon: { $in: madonList } }] }, { Madon: 1, status: 1 });
         const madonStatusMap = {};
         orderStatusList.forEach(o => {
             if (o.Madon) madonStatusMap[o.Madon] = o.status;
