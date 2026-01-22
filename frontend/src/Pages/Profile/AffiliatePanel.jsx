@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAffiliateInfo, getAffiliateReferrals, getMyPendingCommissions, requestCommissionWithdrawal, getMyWithdrawals } from '@/Utils/api';
+import { getAffiliateInfo, getAffiliateReferrals, getMyPendingCommissions, requestCommissionWithdrawal, getMyWithdrawals, getBankList } from '@/Utils/api';
 import Table from "react-bootstrap/Table";
 import { useOutletContext } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -17,7 +17,8 @@ export default function AffiliatePanel({ token }) {
     // Withdrawal states
     const [withdrawAmount, setWithdrawAmount] = useState('');
     const [withdrawType, setWithdrawType] = useState('balance');
-    const [bankInfo, setBankInfo] = useState({ bankName: '', accountNumber: '', accountName: '' });
+    const [bankInfo, setBankInfo] = useState({ bankCode: '', bankName: '', accountNumber: '', accountName: '' });
+    const [bankList, setBankList] = useState([]);
     const [withdrawing, setWithdrawing] = useState(false);
     const [withdrawals, setWithdrawals] = useState([]);
     const [showWithdrawHistory, setShowWithdrawHistory] = useState(false);
@@ -26,7 +27,15 @@ export default function AffiliatePanel({ token }) {
         fetchAffiliateInfo();
         fetchPendingInfo();
         fetchWithdrawals();
+        fetchBankList();
     }, []);
+
+    const fetchBankList = async () => {
+        try {
+            const res = await getBankList();
+            if (res?.data) setBankList(res.data);
+        } catch (err) { }
+    };
 
     useEffect(() => {
         fetchReferrals();
@@ -65,7 +74,7 @@ export default function AffiliatePanel({ token }) {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const formatMoney = (amount) => Number(amount || 0).toLocaleString('vi-VN');
+    const formatMoney = (amount) => Math.floor(Number(amount)).toLocaleString("en-US");
 
     const fetchWithdrawals = async () => {
         try {
@@ -223,6 +232,62 @@ export default function AffiliatePanel({ token }) {
                 </div>
             </div>
 
+            {/* Chính sách hoa hồng */}
+            <div className="col-12">
+                <div className="card h-100 border-0 shadow-sm">
+                    <div className="card-header bg-secondary text-white">
+                        <i className="fas fa-file-invoice-dollar me-2"></i>Chính sách & Điều kiện
+                    </div>
+                    <div className="card-body">
+                        <div className="row g-3 text-center">
+                            <div className="col-md-3 col-6">
+                                <div className="p-3 border rounded bg-light h-100">
+                                    <i className="fas fa-percent text-primary mb-2 fs-4"></i>
+                                    <h6 className="fw-bold mb-1">{configWeb?.affiliateCommissionPercent || 0}%</h6>
+                                    <small className="text-muted">Hoa hồng</small>
+                                </div>
+                            </div>
+                            <div className="col-md-3 col-6">
+                                <div className="p-3 border rounded bg-light h-100">
+                                    <i className="fas fa-money-bill-wave text-success mb-2 fs-4"></i>
+                                    <h6 className="fw-bold mb-1">{formatMoney(configWeb?.affiliateMinDeposit || 0)} đ</h6>
+                                    <small className="text-muted">Nạp tối thiểu</small>
+                                </div>
+                            </div>
+                            <div className="col-md-3 col-6">
+                                <div className="p-3 border rounded bg-light h-100">
+                                    <i className="fas fa-hand-holding-usd text-warning mb-2 fs-4"></i>
+                                    <h6 className="fw-bold mb-1">{formatMoney(configWeb?.withdrawMinAmount || 0)} đ</h6>
+                                    <small className="text-muted">Rút tối thiểu</small>
+                                </div>
+                            </div>
+                            <div className="col-md-3 col-6">
+                                <div className="p-3 border rounded bg-light h-100">
+                                    <i className="fas fa-university text-info mb-2 fs-4"></i>
+                                    <h6 className="fw-bold mb-1">
+                                        {[
+                                            configWeb?.withdrawToBankEnabled !== false && 'Bank',
+                                            configWeb?.withdrawToBalanceEnabled !== false && 'Số dư',
+                                        ].filter(Boolean).join(' / ') || 'N/A'}
+                                    </h6>
+                                    <small className="text-muted">Cổng rút</small>
+                                </div>
+                            </div>
+                            {(configWeb?.withdrawFeePercent > 0 || configWeb?.withdrawFeeFixed > 0) && (
+                                <div className="col-12">
+                                    <div className="alert alert-light border mb-0 py-2 small text-start">
+                                        <i className="fas fa-info-circle me-2 text-primary"></i>
+                                        <strong>Phí rút:</strong> {configWeb?.withdrawFeePercent > 0 && <span>{configWeb?.withdrawFeePercent}%</span>}
+                                        {configWeb?.withdrawFeePercent > 0 && configWeb?.withdrawFeeFixed > 0 && <span> + </span>}
+                                        {configWeb?.withdrawFeeFixed > 0 && <span>{formatMoney(configWeb?.withdrawFeeFixed)} đ</span>}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Rút hoa hồng */}
             <div className="col-12">
                 <div className="card border-0 shadow-sm">
@@ -271,8 +336,26 @@ export default function AffiliatePanel({ token }) {
                                     {withdrawType === 'bank' && (
                                         <div className="row g-2 mt-2">
                                             <div className="col-md-4">
-                                                <input type="text" className="form-control" placeholder="Tên ngân hàng"
-                                                    value={bankInfo.bankName} onChange={(e) => setBankInfo({ ...bankInfo, bankName: e.target.value })} />
+                                                <select
+                                                    className="form-select"
+                                                    value={bankInfo.bankCode}
+                                                    onChange={(e) => {
+                                                        const code = e.target.value;
+                                                        const bank = bankList.find(b => b.code === code);
+                                                        setBankInfo({
+                                                            ...bankInfo,
+                                                            bankCode: code,
+                                                            bankName: bank ? bank.shortName : ''
+                                                        });
+                                                    }}
+                                                >
+                                                    <option value="">-- Chọn ngân hàng --</option>
+                                                    {bankList.map((b) => (
+                                                        <option key={b.code} value={b.code}>
+                                                            {b.shortName} - {b.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </div>
                                             <div className="col-md-4">
                                                 <input type="text" className="form-control" placeholder="Số tài khoản"
@@ -302,6 +385,7 @@ export default function AffiliatePanel({ token }) {
                                                 <tr>
                                                     <th>Số tiền</th>
                                                     <th>Phí</th>
+                                                    <th>Thực nhận</th>
                                                     <th>Loại</th>
                                                     <th>Trạng thái</th>
                                                     <th>Thời gian</th>
@@ -312,7 +396,12 @@ export default function AffiliatePanel({ token }) {
                                                     <tr key={w._id}>
                                                         <td>{formatMoney(w.amount)} đ</td>
                                                         <td>{formatMoney(w.fee)} đ</td>
-                                                        <td>{w.type === 'bank' ? 'Ngân hàng' : 'Số dư'}</td>
+                                                        <td>{formatMoney(w.netAmount || w.amount - w.fee)} đ</td>
+                                                        <td>{w.type === 'bank' ? <td>
+                                                            Ngân hàng: <span>{w.bankInfo?.bankName}</span> <br />
+                                                            STK: <span>{w.bankInfo?.accountNumber}</span> <br />
+                                                            Tên chủ TK: <span>{w.bankInfo?.accountName}</span>
+                                                        </td> : <span >Số dư web</span>}</td>
                                                         <td>{getStatusBadge(w.status)}</td>
                                                         <td><small>{new Date(w.createdAt).toLocaleString('vi-VN')}</small></td>
                                                     </tr>

@@ -103,7 +103,7 @@ const WithdrawalRequests = () => {
         }
     };
 
-    const formatMoney = (num) => Number(num || 0).toLocaleString('vi-VN');
+    const formatMoney = (num) => Math.floor(Number(num)).toLocaleString("en-US");
     const formatDate = (date) => new Date(date).toLocaleString('vi-VN');
 
     const getStatusBadge = (s) => {
