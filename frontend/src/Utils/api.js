@@ -468,6 +468,18 @@ export const getMe = async (token) => {
   return handleResponse(response);
 };
 
+// User tạo mã nạp tiền mới
+export const generateDepositCode = async (token) => {
+  const response = await fetchWithAuth(`${API_BASE}/user/generate-deposit-code`, {
+    method: "POST",
+    headers: withNoStore({
+      "Content-Type": "application/json",
+    }),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
 export const changePassword = async (id, data, token) => {
   const response = await fetchWithAuth(`${API_BASE}/user/changePassword/${id}`, {
     method: "PUT",
@@ -1054,7 +1066,7 @@ export const deletePromotion = async (id, token) => {
   });
   return handleResponse(response);
 };
-export const getTransactions = async (token, page = 1, limit = 10, username = "", transactionID = "") => {
+export const getTransactions = async (token, page = 1, limit = 10, username = "", transactionID = "", code = "") => {
   // Xây dựng query string
   const queryParams = new URLSearchParams({
     page,
@@ -1069,9 +1081,27 @@ export const getTransactions = async (token, page = 1, limit = 10, username = ""
     queryParams.append("transactionID", transactionID);
   }
 
+  if (code) {
+    queryParams.append("code", code);
+  }
+
   const response = await fetchWithAuth(`${API_BASE}/transactions?${queryParams.toString()}`, {
     method: "GET",
     headers: withNoStore({}),
+    cache: "no-store",
+  });
+
+  return handleResponse(response);
+};
+
+// Manual deposit - Admin cộng tiền thủ công
+export const manualDeposit = async (depositCode, amount) => {
+  const response = await fetchWithAuth(`${API_BASE}/transactions/manual-deposit`, {
+    method: "POST",
+    headers: withNoStore({
+      "Content-Type": "application/json",
+    }),
+    body: JSON.stringify({ depositCode, amount }),
     cache: "no-store",
   });
 
@@ -1100,3 +1130,69 @@ export const updateConfigTele = async (data, token) => {
   });
   return handleResponse(response);
 };
+
+// ==================== AFFILIATE APIs ====================
+// Lấy thông tin affiliate của user
+export const getAffiliateInfo = async (token) => {
+  const response = await fetchWithAuth(`${API_BASE}/affiliate/info`, {
+    method: "GET",
+    headers: withNoStore({}),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
+// Lấy danh sách người đã giới thiệu
+export const getAffiliateReferrals = async (token, page = 1, limit = 10, level = 1) => {
+  const queryString = `?page=${page}&limit=${limit}&level=${level}`;
+  const response = await fetchWithAuth(`${API_BASE}/affiliate/referrals${queryString}`, {
+    method: "GET",
+    headers: withNoStore({}),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
+// Lấy hoa hồng đang chờ duyệt của user
+export const getMyPendingCommissions = async (token) => {
+  const response = await fetchWithAuth(`${API_BASE}/affiliate/pending`, {
+    method: "GET",
+    headers: withNoStore({}),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
+// ==================== ADMIN AFFILIATE APIs ====================
+// Lấy danh sách commission (admin)
+export const getAffiliateCommissions = async (token, status = 'pending', page = 1, limit = 20) => {
+  const queryString = `?status=${status}&page=${page}&limit=${limit}`;
+  const response = await fetchWithAuth(`${API_BASE}/admin/affiliate/commissions${queryString}`, {
+    method: "GET",
+    headers: withNoStore({}),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
+// Duyệt hoa hồng (admin)
+export const approveAffiliateCommission = async (token, commissionId) => {
+  const response = await fetchWithAuth(`${API_BASE}/admin/affiliate/approve/${commissionId}`, {
+    method: "POST",
+    headers: withNoStore({ "Content-Type": "application/json" }),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+
+// Từ chối hoa hồng (admin)
+export const rejectAffiliateCommission = async (token, commissionId, reason = '') => {
+  const response = await fetchWithAuth(`${API_BASE}/admin/affiliate/reject/${commissionId}`, {
+    method: "POST",
+    headers: withNoStore({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ reason }),
+    cache: "no-store",
+  });
+  return handleResponse(response);
+};
+

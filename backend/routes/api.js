@@ -74,6 +74,16 @@ router.get('/thecao/history', authenticate.authenticateUser, card.GetHistoryCard
 router.get('/user', authenticate.authenticateUser, user.getMe);// lấy thông tin của mình
 router.put('/user/changePassword/:id', authenticate.authenticateUser, user.changePassword); // ok cả admin và user
 router.get('/user/history', authenticate.authenticateUser, user.getHistory); // Lấy lịch sử giao dịch của người dùng
+router.post('/user/generate-deposit-code', authenticate.authenticateUser, user.generateNewDepositCode); // User tự tạo mã nạp tiền mới
+// Affiliate routes
+router.get('/affiliate/info', authenticate.authenticateUser, user.getAffiliateInfo); // Lấy thông tin affiliate của user
+router.get('/affiliate/referrals', authenticate.authenticateUser, user.getAffiliateReferrals); // Lấy danh sách người đã giới thiệu
+router.get('/affiliate/pending', authenticate.authenticateUser, user.getMyPendingCommissions); // Lấy các khoản hoa hồng đang chờ xử lý của người dùng
+
+// Admin Affiliate Commission APIs
+router.get('/admin/affiliate/commissions', authenticate.authenticateAdmin, user.getAffiliateCommissions); // Lấy tất cả các khoản hoa hồng affiliate
+router.post('/admin/affiliate/approve/:commissionId', authenticate.authenticateAdmin, user.approveAffiliateCommission); // Phê duyệt hoa hồng affiliate
+router.post('/admin/affiliate/reject/:commissionId', authenticate.authenticateAdmin, user.rejectAffiliateCommission); // Từ chối hoa hồng affiliate
 router.get('/server', authenticate.authenticateUser, server.getServer); // Lấy thông tin lịch sử thẻ cào theo ID người dùng
 router.get('/servers', authenticate.authenticateUser, server.getServerByTypeAndPath);
 // admin services
@@ -136,6 +146,7 @@ router.put('/configtele', authenticate.authenticateAdmin, configTeleController.u
 // Route để lấy danh sách dịch vụ từ SMM
 router.get('/getservices/:id', authenticate.authenticateAdmin, SmmController.getServices);
 router.get('/transactions', authenticate.authenticateUser, banking.getTransactions);
+router.post('/transactions/manual-deposit', authenticate.authenticateAdmin, banking.manualDeposit);
 // Telegram linking
 // router.post('/user/telegram/link/start', authenticate.authenticateUser, user.startTelegramLink);
 

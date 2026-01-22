@@ -31,6 +31,21 @@ const userSchema = new mongoose.Schema({
   telegramLinkedAt: { type: Date },
   telegramBalanceSent: { type: Boolean, default: false },
 
+  // Unique deposit code for bank transfer identification
+  depositCode: { type: String, unique: true, sparse: true, index: true },
+
+  // Affiliate fields
+  referralCode: { type: String, unique: true, sparse: true, index: true }, // Mã giới thiệu của user này
+  referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // User đã giới thiệu user này
+  referredByCode: { type: String, default: null }, // Mã giới thiệu khi đăng ký (lưu để tra cứu)
+  affiliateStats: {
+    totalEarnings: { type: Number, default: 0 }, // Tổng hoa hồng đã nhận
+    totalReferrals: { type: Number, default: 0 }, // Tổng số người đã giới thiệu (cấp 1)
+    monthlyEarnings: { type: Number, default: 0 }, // Hoa hồng tháng này
+    lastEarningMonth: { type: Number, default: 0 }, // Tháng nhận hoa hồng gần nhất
+    lastEarningYear: { type: Number, default: 0 } // Năm nhận hoa hồng gần nhất
+  },
+
 }, { timestamps: true }); // Tự động tạo createdAt và updatedAt
 
 // Pre-save hook: mã hóa mật khẩu và cập nhật userId nếu chưa có

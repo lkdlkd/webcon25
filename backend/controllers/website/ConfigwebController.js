@@ -33,7 +33,7 @@ exports.getConfigweb = async (req, res) => {
             logolienhe: "",
           },
         ],
-        cuphap: "naptien", // Thêm giá trị mặc định cho cuphap
+        cuphap: "", // Thêm giá trị mặc định cho cuphap
       });
       await config.save();
     }
@@ -54,9 +54,11 @@ exports.getConfigweb = async (req, res) => {
       footerJs: config.footerJs,
       tigia: config.tigia,
       notenaptien: config.notenaptien,
+      affiliateMinDeposit: config.affiliateMinDeposit,
+      affiliateCommissionPercent: config.affiliateCommissionPercent,
     };
 
-    // Chỉ hiển thị viewluotban nếu user là admin
+    // Chỉ hiển thị các fields admin nếu user là admin
     const user = req.user;
     if (user && user.role === 'admin') {
       responseData.viewluotban = config.viewluotban;
@@ -66,6 +68,9 @@ exports.getConfigweb = async (req, res) => {
       responseData.deleteOrders = config.deleteOrders;
       responseData.deleteUsers = config.deleteUsers;
       responseData.deleteHistory = config.deleteHistory;
+      // Affiliate config
+      responseData.affiliateEnabled = config.affiliateEnabled;
+
     }
 
     res.status(200).json({ success: true, data: responseData });
@@ -108,7 +113,7 @@ exports.getConfigwebLogo = async (req, res) => {
             logolienhe: "",
           },
         ],
-        cuphap: "naptien", // Thêm giá trị mặc định cho cuphap
+        cuphap: "", // Thêm giá trị mặc định cho cuphap
       });
       await config.save();
     }
@@ -132,7 +137,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien, affiliateEnabled, affiliateMinDeposit, affiliateCommissionPercent } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -154,7 +159,7 @@ exports.updateConfigweb = async (req, res) => {
     config.distributor = distributor !== undefined ? distributor : 10000000;
     config.favicon = favicon !== undefined ? favicon : "";
     config.lienhe = lienhe !== undefined ? lienhe : [];
-    config.cuphap = cuphap !== undefined && cuphap.trim() !== "" ? cuphap : config.cuphap || "naptien"; // Kiểm tra giá trị trống cho cuphap
+    config.cuphap = cuphap !== undefined ? cuphap : config.cuphap; // Cho phép cuphap rỗng
     config.linktele = linktele !== undefined ? linktele : ""; // Kiểm tra giá trị trống cho linktele
     config.viewluotban = viewluotban !== undefined ? viewluotban : config.viewluotban || false; // Kiểm tra giá trị trống cho viewluotban
     config.autoactive = autoactive !== undefined ? autoactive : config.autoactive || false; // Kiểm tra giá trị trống cho autoactive
@@ -167,6 +172,10 @@ exports.updateConfigweb = async (req, res) => {
     config.footerJs = req.body.footerJs !== undefined ? req.body.footerJs : config.footerJs || "";
     config.tigia = tigia !== undefined ? tigia : 25000;
     config.notenaptien = notenaptien !== undefined ? notenaptien : "";
+    // Affiliate config
+    config.affiliateEnabled = affiliateEnabled !== undefined ? affiliateEnabled : config.affiliateEnabled;
+    config.affiliateMinDeposit = affiliateMinDeposit !== undefined ? affiliateMinDeposit : config.affiliateMinDeposit;
+    config.affiliateCommissionPercent = affiliateCommissionPercent !== undefined ? affiliateCommissionPercent : config.affiliateCommissionPercent;
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });

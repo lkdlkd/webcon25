@@ -247,9 +247,31 @@ exports.disable2FA = async (req, res) => {
   }
 };
 
+// Helper: Tạo mã nạp tiền (6 ký tự) - duplicate sẽ được unique index xử lý
+function generateUniqueDepositCode() {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const codeLength = 6;
+  let code = '';
+  for (let i = 0; i < codeLength; i++) {
+    code += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return code;
+}
+
+// Helper: Tạo mã giới thiệu (8 ký tự) - bỏ I, O, 0, 1 để tránh nhầm lẫn
+function generateReferralCode() {
+  const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const codeLength = 8;
+  let code = '';
+  for (let i = 0; i < codeLength; i++) {
+    code += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return code;
+}
+
 exports.register = async (req, res) => {
   try {
-    let { username, password, recaptchaToken } = req.body;
+    let { username, password, recaptchaToken, referralCode: inputReferralCode } = req.body;
 
     // Xác thực reCAPTCHA
     const { verifyRecaptcha } = require('../captcha/captchaController');
@@ -293,16 +315,85 @@ exports.register = async (req, res) => {
     // **Tạo API key**
     const apiKey = crypto.randomBytes(32).toString("hex");
 
-    // Tạo người dùng mới
-    const user = new User({
-      username,
-      password,
-      role: isAdminExists ? "user" : "admin",
-      apiKey, // **Lưu API key**
-    });
+    // **Tạo user với retry cho depositCode trùng**
+    let savedUser = null;
+    const maxRetries = 10;
 
-    await user.save();
+    for (let retry = 0; retry < maxRetries; retry++) {
+      try {
+        const depositCode = generateUniqueDepositCode();
+        const referralCode = generateReferralCode();
 
+        // Tìm người giới thiệu (nếu có)
+        let referrer = null;
+        if (inputReferralCode) {
+          referrer = await User.findOne({ referralCode: inputReferralCode.toUpperCase() });
+        }
+
+        const user = new User({
+          username,
+          password,
+          role: isAdminExists ? "user" : "admin",
+          apiKey,
+          depositCode,
+          referralCode,
+          referredBy: referrer ? referrer._id : null,
+          referredByCode: referrer ? inputReferralCode.toUpperCase() : null,
+        });
+        savedUser = await user.save();
+        break; // Thành công
+      } catch (saveErr) {
+        if (saveErr.code === 11000 && saveErr.keyPattern?.depositCode) {
+          // Duplicate depositCode - retry
+          console.log(`⚠️ Mã nạp tiền trùng, retry ${retry + 1}/${maxRetries}...`);
+          continue;
+        }
+        throw saveErr; // Lỗi khác, throw ra ngoài
+      }
+    }
+
+    // Fallback: dùng timestamp nếu tất cả retry đều trùng
+    if (!savedUser) {
+      try {
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 6 - timestamp.length);
+        const depositCode = (timestamp + randomPart).substring(0, 6);
+        const referralCode = generateReferralCode();
+
+        // Tìm người giới thiệu (nếu có)
+        let referrer = null;
+        if (inputReferralCode) {
+          referrer = await User.findOne({ referralCode: inputReferralCode.toUpperCase() });
+        }
+
+        const user = new User({
+          username,
+          password,
+          role: isAdminExists ? "user" : "admin",
+          apiKey,
+          depositCode,
+          referralCode,
+          referredBy: referrer ? referrer._id : null,
+          referredByCode: referrer ? inputReferralCode.toUpperCase() : null,
+        });
+        savedUser = await user.save();
+        console.log(`✅ Fallback timestamp code: ${depositCode}`);
+      } catch (fallbackErr) {
+        return res.status(500).json({ error: "Không thể tạo tài khoản, vui lòng thử lại" });
+      }
+    }
+
+    // Cập nhật thống kê affiliate cho người giới thiệu
+    if (savedUser && savedUser.referredBy) {
+      try {
+        await User.findByIdAndUpdate(savedUser.referredBy, {
+          $inc: { 'affiliateStats.totalReferrals': 1 }
+        });
+        console.log(`✅ Đã cập nhật totalReferrals cho người giới thiệu`);
+      } catch (affiliateErr) {
+        console.error('Lỗi cập nhật affiliate stats:', affiliateErr.message);
+      }
+    }
 
     // **Thông báo qua Telegram**
     const teleConfig = await Telegram.findOne();
@@ -312,6 +403,7 @@ exports.register = async (req, res) => {
       const telegramMessage =
         `📌 *Có khách mới được tạo!*\n` +
         `👤 *Khách hàng:* ${username}\n` +
+        (savedUser.referredByCode ? `🔗 *Được giới thiệu bởi:* ${savedUser.referredByCode}\n` : '') +
         `🔹 *Tạo lúc:* ${taoluc.toLocaleString("vi-VN", {
           day: "2-digit",
           month: "2-digit",
@@ -374,6 +466,7 @@ exports.getMe = async (req, res) => {
       userId: user._id,
       telegramChat: user.telegramChatId ? true : false,
       username: user.username,
+      depositCode: user.depositCode, // Mã nạp tiền duy nhất
       loginHistory,
     });
   } catch (error) {
@@ -931,6 +1024,356 @@ exports.processTelegramCommand = async (chatId, text) => {
   }
 };
 
+// API: User tự tạo mã nạp tiền mới
+exports.generateNewDepositCode = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const user = await User.findOne({ username: currentUser.username });
 
+    if (!user) {
+      return res.status(404).json({ error: 'Người dùng không tồn tại' });
+    }
 
+    // Retry logic để đảm bảo không bị trùng (xử lý race condition)
+    const maxRetries = 10;
+    let attempts = 0;
+    let saved = false;
+    let newCode = '';
 
+    while (attempts < maxRetries && !saved) {
+      try {
+        newCode = generateUniqueDepositCode();
+        user.depositCode = newCode;
+        await user.save();
+        saved = true;
+      } catch (saveError) {
+        // E11000 là lỗi duplicate key của MongoDB
+        if (saveError.code === 11000 && saveError.keyPattern?.depositCode) {
+          attempts++;
+          console.log(`⚠️ Mã ${newCode} bị trùng, thử lại lần ${attempts}...`);
+          continue;
+        }
+        throw saveError; // Lỗi khác thì throw
+      }
+    }
+
+    // Fallback: dùng timestamp nếu tất cả retry đều trùng
+    if (!saved) {
+      try {
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 6 - timestamp.length);
+        newCode = (timestamp + randomPart).substring(0, 6);
+        user.depositCode = newCode;
+        await user.save();
+        saved = true;
+        console.log(`✅ Fallback timestamp code: ${newCode}`);
+      } catch (fallbackErr) {
+        return res.status(500).json({ error: 'Không thể tạo mã duy nhất sau nhiều lần thử' });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      depositCode: newCode,
+      message: 'Mã nạp tiền mới đã được tạo thành công.'
+    });
+  } catch (error) {
+    console.error('Generate new deposit code error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra khi tạo mã nạp tiền' });
+  }
+};
+
+// ============ AFFILIATE APIs ============
+
+// Lấy thông tin affiliate của user
+exports.getAffiliateInfo = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    let user = await User.findOne({ username: currentUser.username });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Người dùng không tồn tại' });
+    }
+
+    // Tự động tạo referralCode nếu chưa có
+    if (!user.referralCode) {
+      const maxRetries = 10;
+      let saved = false;
+
+      for (let retry = 0; retry < maxRetries && !saved; retry++) {
+        try {
+          user.referralCode = generateReferralCode();
+          await user.save();
+          saved = true;
+          console.log(`✅ Đã tạo referralCode mới cho ${user.username}: ${user.referralCode}`);
+        } catch (saveErr) {
+          if (saveErr.code === 11000 && saveErr.keyPattern?.referralCode) {
+            continue; // Retry với mã mới
+          }
+          throw saveErr;
+        }
+      }
+
+      // Fallback với timestamp
+      if (!saved) {
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 8 - timestamp.length);
+        user.referralCode = (timestamp + randomPart).substring(0, 8);
+        await user.save();
+      }
+    }
+
+    // Đếm số người giới thiệu cấp 1
+    const directReferrals = await User.countDocuments({ referredBy: user._id });
+
+    return res.status(200).json({
+      success: true,
+      referralCode: user.referralCode,
+      stats: {
+        totalEarnings: user.affiliateStats?.totalEarnings || 0,
+        monthlyEarnings: user.affiliateStats?.monthlyEarnings || 0,
+        totalReferrals: directReferrals,
+      },
+      referralLink: `${process.env.URL_WEBSITE || ''}/dang-ky?ref=${user.referralCode}`
+    });
+  } catch (error) {
+    console.error('Get affiliate info error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra khi lấy thông tin affiliate' });
+  }
+};
+
+// Lấy danh sách người đã giới thiệu (multi-level)
+exports.getAffiliateReferrals = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const { page = 1, limit = 10, level = 1 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const targetLevel = parseInt(level);
+
+    // Tìm user ID của current user
+    const user = await User.findOne({ username: currentUser.username });
+    if (!user) {
+      return res.status(404).json({ error: 'Người dùng không tồn tại' });
+    }
+
+    // Hàm đệ quy lấy referrals theo cấp
+    async function getReferralsByLevel(userId, currentLevel, targetLevel) {
+      if (currentLevel > targetLevel) return [];
+
+      const directReferrals = await User.find({ referredBy: userId })
+        .select('username createdAt affiliateStats.totalEarnings referralCode')
+        .lean();
+
+      if (currentLevel === targetLevel) {
+        return directReferrals;
+      }
+
+      // Nếu chưa đến cấp target, tiếp tục tìm cấp sâu hơn
+      let allReferrals = [];
+      for (const ref of directReferrals) {
+        const subReferrals = await getReferralsByLevel(ref._id, currentLevel + 1, targetLevel);
+        allReferrals = allReferrals.concat(subReferrals);
+      }
+      return allReferrals;
+    }
+
+    // Lấy referrals theo level
+    const allReferrals = await getReferralsByLevel(user._id, 1, targetLevel);
+    const total = allReferrals.length;
+
+    // Phân trang
+    const referrals = allReferrals.slice(skip, skip + parseInt(limit)).map(r => ({
+      username: r.username,
+      createdAt: r.createdAt,
+      totalDeposit: r.affiliateStats?.totalEarnings || 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      level: targetLevel,
+      referrals,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (error) {
+    console.error('Get affiliate referrals error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra khi lấy danh sách giới thiệu' });
+  }
+};
+
+// ============ ADMIN AFFILIATE COMMISSION APIs ============
+const AffiliateCommission = require('../../models/AffiliateCommission');
+
+// Lấy danh sách commission (admin)
+exports.getAffiliateCommissions = async (req, res) => {
+  try {
+    const { status = 'pending', page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = {};
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    const [commissions, total] = await Promise.all([
+      AffiliateCommission.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      AffiliateCommission.countDocuments(query)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      commissions,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (error) {
+    console.error('Get affiliate commissions error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Duyệt hoa hồng (admin)
+exports.approveAffiliateCommission = async (req, res) => {
+  try {
+    const { commissionId } = req.params;
+    const adminUser = req.user;
+
+    const commission = await AffiliateCommission.findById(commissionId);
+    if (!commission) {
+      return res.status(404).json({ error: 'Không tìm thấy hoa hồng' });
+    }
+    if (commission.status !== 'pending') {
+      return res.status(400).json({ error: 'Hoa hồng đã được xử lý' });
+    }
+
+    // Tìm referrer và cộng tiền
+    const referrer = await User.findById(commission.referrer);
+    if (!referrer) {
+      return res.status(404).json({ error: 'Không tìm thấy người nhận hoa hồng' });
+    }
+
+    // Lấy thời điểm hiện tại
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    // Cập nhật số dư và thống kê affiliate
+    const updateQuery = {
+      $inc: {
+        balance: commission.commissionAmount,
+        'affiliateStats.totalEarnings': commission.commissionAmount
+      }
+    };
+
+    // Reset monthlyEarnings nếu sang tháng mới
+    if (referrer.affiliateStats?.lastEarningMonth !== currentMonth ||
+      referrer.affiliateStats?.lastEarningYear !== currentYear) {
+      updateQuery.$set = {
+        'affiliateStats.monthlyEarnings': commission.commissionAmount,
+        'affiliateStats.lastEarningMonth': currentMonth,
+        'affiliateStats.lastEarningYear': currentYear
+      };
+    } else {
+      updateQuery.$inc['affiliateStats.monthlyEarnings'] = commission.commissionAmount;
+    }
+
+    const updatedReferrer = await User.findByIdAndUpdate(
+      referrer._id,
+      updateQuery,
+      { new: true }
+    );
+
+    // Cập nhật trạng thái commission
+    commission.status = 'approved';
+    commission.approvedBy = adminUser._id;
+    commission.approvedAt = new Date();
+    await commission.save();
+
+    // Lưu lịch sử
+    const historyData = new HistoryUser({
+      username: referrer.username,
+      madon: `AFF-${commission.depositorUsername}`,
+      hanhdong: "Hoa hồng Affiliate",
+      link: "",
+      tienhientai: updatedReferrer.balance - commission.commissionAmount,
+      tongtien: commission.commissionAmount,
+      tienconlai: updatedReferrer.balance,
+      createdAt: new Date(),
+      mota: `Hoa hồng (${commission.commissionPercent}%) từ ${commission.depositorUsername} nạp ${commission.depositAmount.toLocaleString()} VNĐ`,
+    });
+    await historyData.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã duyệt hoa hồng ${commission.commissionAmount.toLocaleString()} VNĐ cho ${referrer.username}`,
+      newBalance: updatedReferrer.balance
+    });
+  } catch (error) {
+    console.error('Approve affiliate commission error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Từ chối hoa hồng (admin)
+exports.rejectAffiliateCommission = async (req, res) => {
+  try {
+    const { commissionId } = req.params;
+    const { reason } = req.body;
+
+    const commission = await AffiliateCommission.findById(commissionId);
+    if (!commission) {
+      return res.status(404).json({ error: 'Không tìm thấy hoa hồng' });
+    }
+    if (commission.status !== 'pending') {
+      return res.status(400).json({ error: 'Hoa hồng đã được xử lý' });
+    }
+
+    // Cập nhật trạng thái
+    commission.status = 'rejected';
+    commission.rejectedReason = reason || 'Admin từ chối';
+    await commission.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đã từ chối hoa hồng'
+    });
+  } catch (error) {
+    console.error('Reject affiliate commission error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Lấy pending commissions của user hiện tại
+exports.getMyPendingCommissions = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const user = await User.findOne({ username: currentUser.username });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Không tìm thấy user' });
+    }
+
+    const pendingCommissions = await AffiliateCommission.find({
+      referrer: user._id,
+      status: 'pending'
+    }).sort({ createdAt: -1 }).lean();
+
+    const totalPending = pendingCommissions.reduce((sum, c) => sum + c.commissionAmount, 0);
+
+    return res.status(200).json({
+      success: true,
+      pendingCommissions,
+      totalPending,
+      count: pendingCommissions.length
+    });
+  } catch (error) {
+    console.error('Get my pending commissions error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};

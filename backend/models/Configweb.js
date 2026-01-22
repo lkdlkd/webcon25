@@ -6,7 +6,7 @@ const configwebSchema = new mongoose.Schema({
   logo: { type: String, default: "" },
   favicon: { type: String, default: "" },
   linktele: { type: String, default: "" },
-  cuphap: { type: String, default: "naptien" },
+  cuphap: { type: String, default: "" },
   daily: { type: Number, default: 1000000 }, // hoa hồng đại lý
   distributor: { type: Number, default: 10000000 }, // hoa hồng nhà phân phối
   viewluotban: { type: Boolean, default: false }, // hiển thị lượt bán trên dịch vụ
@@ -28,6 +28,11 @@ const configwebSchema = new mongoose.Schema({
     },
   ],
   domain: { type: String, default: null },
+
+  // Affiliate configuration
+  affiliateEnabled: { type: Boolean, default: false }, // Bật/tắt chức năng affiliate
+  affiliateMinDeposit: { type: Number, default: 50000 }, // Mức nạp tối thiểu để tính hoa hồng (VNĐ)
+  affiliateCommissionPercent: { type: Number, default: 1 }, // 1% hoa hồng affiliate
 
 }, { timestamps: true });
 

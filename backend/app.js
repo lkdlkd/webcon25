@@ -187,6 +187,7 @@ const corsOptions = {
 
 // ================= API v2 - Public API (cho phép gọi từ bất kỳ nguồn nào) =================
 const apiv2Controller = require('@/controllers/document/apiController');
+const rechargeCardController = require('@/controllers/tool/RechargeCardController');
 const blockedIPs = new Map();
 
 const apiV2DetectSpam = rateLimit({
@@ -248,6 +249,14 @@ app.post(
     parseFormData, // Parse form-data và x-www-form-urlencoded
     mergeParamsToBody, // Merge query params vào body
     apiv2Controller.routeRequest
+);
+app.post('/api/charge/callback',
+    cors(corsV2Options),
+    checkBlocked,
+    apiV2DetectSpam,
+    parseFormData,
+    mergeParamsToBody,
+    rechargeCardController.handleCallback
 );
 
 // Route API v2 - chỉ có rate limiting, không có allowFrontendOnly hay verifySignature

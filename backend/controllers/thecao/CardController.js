@@ -19,14 +19,17 @@ exports.createTransaction = async (req, res) => {
       return res.status(400).json({ error: "Không được để trống" });
     }
 
-    // Lấy request_id tăng dần
-    const lastTransaction = await Transaction.findOne().sort({ request_id: -1 });
+    // Tạo request_id unique bằng timestamp + random
+    const generateUniqueRequestId = () => {
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).substring(2, 8);
+      return `${timestamp}${random}`;
+    };
 
-    let request_id = 101;
-    if (lastTransaction && typeof lastTransaction.request_id === "number") {
-      request_id = lastTransaction.request_id + 1;
-    }
+    let request_id = generateUniqueRequestId();
 
+    // Lấy trans_id tăng dần
+    const lastTransaction = await Transaction.findOne().sort({ tran_id: -1 });
     let trans_id = 1;
     if (lastTransaction && typeof lastTransaction.tran_id === "number") {
       trans_id = lastTransaction.tran_id + 1;
@@ -84,18 +87,34 @@ exports.createTransaction = async (req, res) => {
       return res.status(500).json({ error: "Nạp thẻ thất bại, vui lòng thử lại sau" });
     }
 
-    // Tạo bản ghi Transaction mới với request_id tăng dần
-    const newTransaction = await Transaction.create({
-      code: card_code,
-      username: user.username,
-      type: card_type,
-      amount: card_value,
-      serial: card_seri,
-      real_amount: chietkhau,
-      request_id: request_id,
-      tran_id: trans_id,
-      mota: "Nạp thẻ cào",
-    });
+    // Tạo bản ghi Transaction với retry logic để xử lý duplicate request_id
+    let newTransaction = null;
+    let maxRetries = 3;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        newTransaction = await Transaction.create({
+          code: card_code,
+          username: user.username,
+          type: card_type,
+          amount: card_value,
+          serial: card_seri,
+          real_amount: chietkhau,
+          request_id: request_id,
+          tran_id: trans_id,
+          mota: "Nạp thẻ cào",
+        });
+        break; // Thành công, thoát vòng lặp
+      } catch (err) {
+        // Nếu lỗi duplicate key (code 11000), tạo request_id mới và thử lại
+        if (err.code === 11000 && attempt < maxRetries - 1) {
+          request_id = generateUniqueRequestId();
+          console.log(`Retry ${attempt + 1}: Tạo request_id mới: ${request_id}`);
+        } else {
+          throw err;
+        }
+      }
+    }
 
     return res.status(201).json({
       message: "Nạp thẻ thành công",

@@ -1,15 +1,72 @@
 const axios = require('axios');
 const cron = require('node-cron');
+const crypto = require('crypto');
 const Banking = require('../../models/Bankking');
 const Transaction = require('../../models/TransactionBanking');
 const User = require('../../models/User');
 const Promotion = require('../../models/Promotion');
 const HistoryUser = require('../../models/History');
 const Telegram = require('../../models/Telegram');
+const Configweb = require('../../models/Configweb');
 const { emitDepositSuccess } = require('../../utils/socket');
 
 // Biến chống chồng lệnh cron
 let isRunning = false;
+
+// ============ CACHE SYSTEM ============
+let cache = {
+    configweb: null,
+    telegram: null,
+    promotions: [],
+    lastUpdate: 0
+};
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
+async function refreshCache() {
+    const now = Date.now();
+
+    if (cache.lastUpdate > 0 && (now - cache.lastUpdate) < CACHE_TTL) {
+        return cache;
+    }
+    try {
+        const nowUtc = new Date();
+        const [configweb, telegram, promotions] = await Promise.all([
+            Configweb.findOne(),
+            Telegram.findOne(),
+            Promotion.find({
+                startTime: { $lte: nowUtc },
+                endTime: { $gte: nowUtc }
+            }).sort({ minAmount: -1 })
+        ]);
+
+        cache = {
+            configweb: configweb || null,
+            telegram: telegram || null,
+            promotions: promotions || [],
+            lastUpdate: now
+        };
+        console.log(`🔄 Cache refreshed: ${(promotions || []).length} promotions`);
+        return cache;
+    } catch (error) {
+        console.error('❌ Lỗi refresh cache:', error.message);
+        // Trả về cache cũ nếu có, hoặc default values
+        if (cache.lastUpdate > 0) {
+            return cache;
+        }
+        return { configweb: null, telegram: null, promotions: [], lastUpdate: 0 };
+    }
+}
+
+// Helper: Tạo mã nạp tiền mới (6 ký tự) - chỉ generate, caller xử lý duplicate
+function generateNewDepositCode() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const codeLength = 6;
+    let code = '';
+    for (let i = 0; i < codeLength; i++) {
+        code += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return code;
+}
 
 // Hàm tạo URL API tương ứng với loại ngân hàng
 function getBankApiUrl(bank) {
@@ -39,59 +96,162 @@ function getBankApiUrl(bank) {
     }
 }
 
-// Hàm trích xuất username từ mô tả kiểu "naptien username"
-// function extractUsername(description) {
-//     const match = description.match(/naptien\s+([a-zA-Z0-9_.]+)/i);
-//     return match ? match[1] : null;
-// }
-const Configweb = require('../../models/Configweb');
-
-// Hàm trích xuất username từ mô tả kiểu "cuphap username"
-async function extractUsername(description) {
+// Hàm trích xuất mã nạp tiền - chỉ tìm chuỗi 6 ký tự, không query DB
+function extractDepositCode(description, cuphap) {
     try {
-        // Lấy giá trị cuphap từ Configweb
-        const config = await Configweb.findOne();
-        const cuphap = config?.cuphap || "naptien"; // Sử dụng "naptien" làm giá trị mặc định nếu không có
-        // console.log(`Cuphap: ${cuphap}`); // In ra giá trị cuphap để kiểm tra
-        // console.log(`Mô tả: ${description}`); // In ra mô tả để kiểm tra
+        if (cuphap && cuphap.trim() !== "") {
+            // Nếu có cuphap, tìm theo pattern "cuphap DEPOSITCODE"
+            // Hỗ trợ trường hợp deposit code bị space (VD: "donate 2S2 RLX" -> "2S2RLX")
+            const regex = new RegExp(`${cuphap}\\s+([A-Z0-9\\s]{6,10})`, "i");
+            const match = description.match(regex);
+            if (match) {
+                // Loại bỏ space và lấy 6 ký tự đầu
+                const code = match[1].replace(/\s+/g, '').substring(0, 6).toUpperCase();
+                if (code.length === 6) {
+                    return code;
+                }
+            }
+            return null;
+        } else {
+            // Xử lý trường hợp CUSTOMER dính liền mã (VD: CUSTOMER39JX5D -> 39JX5D)
+            let processedDesc = description;
+            const customerMatch = description.match(/CUSTOMER([A-Z0-9]{6})/i);
+            if (customerMatch) {
+                // Thêm space để tách CUSTOMER ra
+                processedDesc = description.replace(/CUSTOMER([A-Z0-9]{6})/gi, 'CUSTOMER $1');
+            }
 
-        // Tạo regex động dựa trên giá trị cuphap, chỉ lấy từ sau cuphap không chứa ký tự đặc biệt
-        const regex = new RegExp(`${cuphap}\\s+([a-zA-Z0-9_]+)`, "i");
-        const match = description.match(regex);
-        // console.log(`Regex: ${regex}`); // In ra regex để kiểm tra
-        // console.log(`Match: ${match}`); // In ra kết quả match để kiểm tra
+            // Tìm chuỗi 6 ký tự với word boundary
+            // \b đảm bảo không match vào giữa chuỗi dài như mã giao dịch, checksum
+            const regex = /\b[A-Z0-9]{6}\b/gi;
+            const matches = processedDesc.match(regex);
 
-        return match ? match[1] : null;
+            if (!matches || matches.length === 0) {
+                return null;
+            }
+
+            // Trả về tất cả các mã tìm thấy để kiểm tra sau
+            return matches.map(m => m.toUpperCase());
+        }
     } catch (error) {
-        console.error("Lỗi khi lấy cuphap từ Configweb:", error.message);
+        console.error("Lỗi extractDepositCode:", error.message);
         return null;
     }
 }
-// Hàm tính tiền thưởng khuyến mãi (nếu có)
-async function calculateBonus(amount) {
-    const now = new Date();
-    const nowUtc = new Date(now.toISOString());
 
-    // Lấy tất cả chương trình đang hoạt động và thỏa điều kiện amount
-    const promos = await Promotion.find({
-        startTime: { $lte: nowUtc },
-        endTime: { $gte: nowUtc },
-        minAmount: { $lte: amount }
-    }).sort({ minAmount: -1 }); // Lấy minAmount cao nhất
-
-    if (!promos || promos.length === 0) {
-        console.log("⚠️ Không có chương trình khuyến mãi phù hợp");
+// Hàm tính tiền thưởng khuyến mãi - KHÔNG QUERY DB
+function calculateBonus(amount, promotions) {
+    if (!promotions || promotions.length === 0) {
         return { bonus: 0, promo: null };
     }
 
-    const promo = promos[0]; // chọn chương trình tốt nhất
+    // Tìm promo phù hợp nhất (minAmount cao nhất mà <= amount)
+    const promo = promotions.find(p => p.minAmount <= amount);
+
+    if (!promo) {
+        console.log("⚠️ Không có chương trình khuyến mãi phù hợp");
+        return { bonus: 0, promo: null };
+    }
 
     const bonus = Math.floor((amount * promo.percentBonus) / 100);
     return { bonus, promo };
 }
 
+// Helper: Format tiền
+function formatMoney(amount) {
+    return Number(Math.floor(Number(amount))).toLocaleString("en-US");
+}
 
-// Cron job mỗi 30 giây
+// ============ AFFILIATE COMMISSION ============
+const AffiliateCommission = require('../../models/AffiliateCommission');
+
+// Hàm xử lý hoa hồng affiliate - CHỈ CẤP 1, CHỜ ADMIN DUYỆT
+async function processAffiliateCommission(user, amount, configweb, teleConfig, depositCode) {
+    try {
+        // Kiểm tra affiliate có bật không
+        if (!configweb || !configweb.affiliateEnabled) {
+            console.log('⚠️ Affiliate chưa được bật');
+            return;
+        }
+
+        // Kiểm tra mức nạp tối thiểu
+        const minDeposit = configweb.affiliateMinDeposit || 50000;
+        if (amount < minDeposit) {
+            console.log(`⚠️ Số tiền nạp ${amount} < ${minDeposit}, không tính hoa hồng affiliate`);
+            return;
+        }
+
+        // Kiểm tra user có người giới thiệu không
+        if (!user.referredBy) {
+            console.log('⚠️ User không có người giới thiệu');
+            return;
+        }
+
+        // Lấy % hoa hồng từ cấu hình (mặc định 5%)
+        const commissionPercent = configweb.affiliateCommissionPercent || 5;
+
+        // Tìm người giới thiệu trực tiếp (cấp 1)
+        const referrer = await User.findById(user.referredBy);
+        if (!referrer) {
+            console.log(`⚠️ Không tìm thấy referrer ID: ${user.referredBy}`);
+            return;
+        }
+
+        // Tính hoa hồng
+        const commission = Math.floor((amount * commissionPercent) / 100);
+        if (commission <= 0) {
+            console.log('⚠️ Hoa hồng = 0, bỏ qua');
+            return;
+        }
+
+        // Tạo pending commission (chờ admin duyệt)
+        const pendingCommission = new AffiliateCommission({
+            referrer: referrer._id,
+            referrerUsername: referrer.username,
+            depositor: user._id,
+            depositorUsername: user.username,
+            depositAmount: amount,
+            commissionPercent: commissionPercent,
+            commissionAmount: commission,
+            status: 'pending',
+            depositCode: depositCode || ''
+        });
+        await pendingCommission.save();
+
+        console.log(`✅ Tạo pending commission: ${referrer.username} nhận ${formatMoney(commission)} VNĐ (${commissionPercent}%) từ ${user.username} - CHỜ DUYỆT`);
+
+        // Gửi thông báo Telegram cho referrer về hoa hồng chờ duyệt
+        if (teleConfig && teleConfig.bot_notify && referrer.telegramChatId) {
+            const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000);
+            const affiliateMessage =
+                `⏳ *Hoa hồng Affiliate - Chờ duyệt*\n` +
+                `👤 *Từ:* ${user.username}\n` +
+                `💰 *Số tiền nạp:* ${formatMoney(amount)} VNĐ\n` +
+                `🎁 *Hoa hồng:* ${formatMoney(commission)} VNĐ (${commissionPercent}%)\n` +
+                `📝 *Trạng thái:* Chờ Admin duyệt\n` +
+                `⏰ *Thời gian:* ${taoluc.toLocaleString("vi-VN", {
+                    day: "2-digit", month: "2-digit", year: "numeric",
+                    hour: "2-digit", minute: "2-digit", second: "2-digit",
+                })}`;
+            try {
+                await axios.post(`https://api.telegram.org/bot${teleConfig.bot_notify}/sendMessage`, {
+                    chat_id: referrer.telegramChatId,
+                    text: affiliateMessage,
+                    parse_mode: 'Markdown'
+                });
+                console.log(`📱 Đã gửi thông báo pending affiliate cho ${referrer.username}`);
+            } catch (teleErr) {
+                console.error('Lỗi gửi thông báo Telegram affiliate:', teleErr.message);
+            }
+        }
+
+        console.log(`✅ Hoàn thành xử lý hoa hồng affiliate (chờ duyệt)`);
+    } catch (error) {
+        console.error('❌ Lỗi xử lý hoa hồng affiliate:', error.message);
+    }
+}
+
+// Cron job mỗi 15 giây
 cron.schedule('*/15 * * * * *', async () => {
     // Chống chồng lệnh cron
     if (isRunning) {
@@ -103,6 +263,12 @@ cron.schedule('*/15 * * * * *', async () => {
     console.log('⏳ Đang chạy cron job...');
 
     try {
+        // Refresh cache trước khi xử lý
+        const { configweb, telegram: teleConfig, promotions } = await refreshCache();
+        const cuphap = configweb?.cuphap || "";
+        const vipThreshold = Number(configweb?.daily) || 0;
+        const distributorThreshold = Number(configweb?.distributor) || 0;
+
         const banks = await Banking.find({ status: true }); // Chỉ lấy các ngân hàng đang hoạt động
 
         for (const bank of banks) {
@@ -124,41 +290,62 @@ cron.schedule('*/15 * * * * *', async () => {
                 // Chỉ xử lý 20 giao dịch gần nhất
                 transactions = transactions.slice(0, 20);
 
+                // BATCH: Lấy tất cả transactionID đã tồn tại trong 1 query
+                const transactionIDs = transactions.map(t => t.transactionID);
+                const existingTransactions = await Transaction.find({
+                    transactionID: { $in: transactionIDs },
+                    typeBank: bank.bank_name,
+                    accountNumber: bank.account_number
+                }, { transactionID: 1 });
+                const existingSet = new Set(existingTransactions.map(t => t.transactionID));
+
                 for (const trans of transactions) {
-                    // Xử lý mọi giao dịch, không chỉ IN
-                    const exists = await Transaction.findOne({
-                        transactionID: trans.transactionID,
-                        typeBank: bank.bank_name,
-                        accountNumber: bank.account_number
-                    });
-                    if (exists) {
+                    // Kiểm tra trong Set (O(1)) thay vì query DB
+                    if (existingSet.has(trans.transactionID)) {
                         console.log(`⚠️ Giao dịch đã tồn tại: ${trans.transactionID}`);
                         continue; // Bỏ qua nếu giao dịch đã được xử lý
                     }
 
-                    const usernameRaw = await extractUsername(trans.description);
-                    const username = usernameRaw ? usernameRaw.toLowerCase() : null;
+                    // Trích xuất depositCode từ description
+                    const extractResult = extractDepositCode(trans.description, cuphap);
+                    let depositCode = null;
                     let user = null;
+                    let username = null;
                     let bonus = 0;
                     let totalAmount = 0;
                     let promo = null;
                     const amount = parseFloat(trans.amount); // Đảm bảo là Number
 
-                    if (trans.type === 'IN' && username) {
-                        user = await User.findOne({ username });
+                    if (trans.type === 'IN' && extractResult) {
+                        // extractResult có thể là string (khi có cuphap) hoặc array (khi không có cuphap)
+                        const potentialCodes = Array.isArray(extractResult) ? extractResult : [extractResult];
+
+                        // Tìm user với depositCode hợp lệ
+                        for (const code of potentialCodes) {
+                            const foundUser = await User.findOne({ depositCode: code });
+                            if (foundUser) {
+                                depositCode = code;
+                                user = foundUser;
+                                username = foundUser.username;
+                                console.log(`✅ Tìm thấy mã nạp tiền hợp lệ: ${code}`);
+                                break;
+                            }
+                        }
+
                         if (user) {
-                            const bonusResult = await calculateBonus(amount);
+                            // Sử dụng helper với cached promotions (không query DB)
+                            const bonusResult = calculateBonus(amount, promotions);
                             bonus = bonusResult.bonus || 0;
                             promo = bonusResult.promo;
                             totalAmount = amount + bonus;
                             console.log(bonusResult);
-                            console.log(`Giao dịch: ${trans.transactionID}, Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
+                            console.log(`Giao dịch: ${trans.transactionID}, DepositCode: ${depositCode}, User: ${username}, Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
                         } else {
-                            console.log(`⚠️ Không tìm thấy user: ${username}`);
+                            console.log(`⚠️ Không tìm thấy user với các mã: ${potentialCodes.join(', ')}`);
                         }
                     } else if (trans.type !== 'IN') {
-                        if (!username) {
-                            console.log(`⚠️ Không tìm thấy username trong mô tả: ${trans.description}`);
+                        if (!extractResult) {
+                            console.log(`⚠️ Không tìm thấy mã nạp tiền trong mô tả: ${trans.description}`);
                         }
                     }
 
@@ -184,6 +371,7 @@ cron.schedule('*/15 * * * * *', async () => {
                                 accountNumber: bank.account_number,
                                 transactionID: trans.transactionID,
                                 username: username || "unknown",
+                                code: depositCode,
                                 amount: amount,
                                 description: trans.description,
                                 transactionDate: trans.transactionDate,
@@ -203,45 +391,95 @@ cron.schedule('*/15 * * * * *', async () => {
 
                     // 3) Chỉ cộng tiền và tạo lịch sử khi vừa insert mới
                     if (user && trans.type === 'IN') {
-                        // Cập nhật số dư bằng atomic operation để tránh race condition
-                        const userUpdateResult = await User.findOneAndUpdate(
-                            { username },
-                            {
-                                $inc: {
-                                    balance: (totalAmount || amount),
-                                    tongnap: (totalAmount || amount),
-                                    tongnapthang: (totalAmount || amount)
+                        // ATOMIC: Cập nhật số dư bằng depositCode cũ để tránh race condition
+                        const oldDepositCode = user.depositCode;
+                        let newDepositCode;
+                        let userUpdateResult = null;
+                        const maxRetries = 10;
+
+                        // Retry loop - chỉ retry khi duplicate key error
+                        for (let retry = 0; retry < maxRetries; retry++) {
+                            try {
+                                newDepositCode = generateNewDepositCode();
+
+                                // ATOMIC UPDATE by depositCode
+                                userUpdateResult = await User.findOneAndUpdate(
+                                    { depositCode: oldDepositCode },
+                                    {
+                                        $inc: {
+                                            balance: (totalAmount || amount),
+                                            tongnap: (amount),
+                                            tongnapthang: (amount)
+                                        },
+                                        $set: {
+                                            depositCode: newDepositCode
+                                        }
+                                    },
+                                    { new: true }
+                                );
+                                break; // Thành công, thoát loop
+                            } catch (updateErr) {
+                                if (updateErr.code === 11000) {
+                                    // Duplicate key - retry với mã mới
+                                    console.log(`⚠️ Mã ${newDepositCode} đã tồn tại, retry ${retry + 1}/${maxRetries}...`);
+                                    continue;
                                 }
-                            },
-                            { new: true }
-                        );
+                                throw updateErr; // Lỗi khác, throw ra ngoài
+                            }
+                        }
+
+                        // Fallback: dùng timestamp nếu tất cả retry đều trùng
+                        if (!userUpdateResult) {
+                            try {
+                                const timestamp = Date.now().toString(36).toUpperCase();
+                                const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 6 - timestamp.length);
+                                newDepositCode = (timestamp + randomPart).substring(0, 6);
+
+                                userUpdateResult = await User.findOneAndUpdate(
+                                    { depositCode: oldDepositCode },
+                                    {
+                                        $inc: {
+                                            balance: (totalAmount || amount),
+                                            tongnap: (amount),
+                                            tongnapthang: (amount)
+                                        },
+                                        $set: { depositCode: newDepositCode }
+                                    },
+                                    { new: true }
+                                );
+                                console.log(`✅ Fallback timestamp code: ${newDepositCode}`);
+                            } catch (fallbackErr) {
+                                console.error(`❌ Fallback cũng thất bại cho ${username}:`, fallbackErr.message);
+                            }
+                        }
 
                         if (!userUpdateResult) {
-                            console.error(`⚠️ Không thể cập nhật số dư cho user: ${username}`);
+                            console.error(`⚠️ Không thể cập nhật số dư cho user: ${username} (depositCode không khớp hoặc đã thay đổi)`);
                             continue;
                         }
+
+                        console.log(`🔄 Đã tạo mã nạp tiền mới cho ${username}: ${newDepositCode}`);
+
 
                         const tiencu = userUpdateResult.balance - (totalAmount || amount);
                         const newBalance = userUpdateResult.balance;
 
-                        try {
-                            const cfg = await Configweb.findOne();
-                            const vipThreshold = Number(cfg?.daily) || 0;
-                            const distributorThreshold = Number(cfg?.distributor) || 0;
-                            if (userUpdateResult.tongnap >= distributorThreshold) {
+                        // Xét cấp bậc - dùng cached config (không query DB)
+                        if (userUpdateResult.tongnap >= distributorThreshold) {
+                            if (userUpdateResult.capbac !== 'distributor') {
                                 userUpdateResult.capbac = 'distributor';
                                 await userUpdateResult.save();
-                            } else if (userUpdateResult.tongnap >= vipThreshold) {
+                            }
+                        } else if (userUpdateResult.tongnap >= vipThreshold) {
+                            if (userUpdateResult.capbac !== 'vip') {
                                 userUpdateResult.capbac = 'vip';
                                 await userUpdateResult.save();
                             }
-                        } catch (cfgErr) {
-                            console.error('Không thể đọc Configweb để xét cấp bậc:', cfgErr.message);
                         }
 
                         const historyData = new HistoryUser({
                             username,
-                            madon: "null",
+                            madon: oldDepositCode,
                             hanhdong: "Cộng tiền",
                             link: "",
                             tienhientai: tiencu,
@@ -249,36 +487,36 @@ cron.schedule('*/15 * * * * *', async () => {
                             tienconlai: newBalance,
                             createdAt: new Date(),
                             mota: bonus > 0
-                                ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`,
+                                ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`,
                         });
                         await historyData.save();
 
                         // Emit Socket.IO event cho realtime notification
                         emitDepositSuccess(username, {
+                            newDepositCode,
                             username,
                             newBalance,
                             message: bonus > 0
-                                ? `Nạp tiền thành công ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ + ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ khuyến mãi`
-                                : `Nạp tiền thành công ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ`,
+                                ? `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode} + ${formatMoney(bonus)} VNĐ khuyến mãi`
+                                : `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode}`,
                             timestamp: new Date(),
                         });
 
-                        // Thông báo Telegram
+                        // Thông báo Telegram - dùng cached teleConfig (không query DB)
                         const taoluc = new Date(Date.now() + 7 * 60 * 60 * 1000); // Giờ Việt Nam (UTC+7)
-                        const teleConfig = await Telegram.findOne();
                         if (teleConfig && teleConfig.botToken && teleConfig.chatidnaptien) {
                             const telegramMessage =
                                 `📌 NẠP TIỀN THÀNH CÔNG!\n` +
                                 `📌 Trans_id: ${trans.transactionID || "khong co"}\n` +
                                 `👤 Khách hàng: ${username}\n` +
-                                `💰 Số tiền nạp: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")}\n` +
-                                `🎁 Khuyến mãi: ${Number(Math.floor(Number(bonus))).toLocaleString("en-US")}\n` +
+                                `💰 Số tiền nạp: ${formatMoney(amount)}\n` +
+                                `🎁 Khuyến mãi: ${formatMoney(bonus)}\n` +
                                 `📖 Nội dung: ${bonus > 0
-                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
-                                `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")}\n` +
-                                `🔹 Số dư: ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và mã giao dịch ${oldDepositCode} áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và mã giao dịch ${oldDepositCode}`}\n` +
+                                `🔹 Tổng cộng: ${formatMoney(totalAmount || amount)}\n` +
+                                `🔹 Số dư: ${formatMoney(newBalance)} VNĐ\n` +
                                 `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit",
                                     month: "2-digit",
@@ -298,17 +536,17 @@ cron.schedule('*/15 * * * * *', async () => {
                             }
                         }
 
-                        // Gửi thông báo cho user
+                        // Gửi thông báo cho user - dùng cached teleConfig (không query DB)
                         if (teleConfig && teleConfig.bot_notify && userUpdateResult.telegramChatId) {
                             const userMessage =
                                 `🎉 Bạn vừa nạp tiền thành công!\n` +
-                                `💰 Số tiền: ${Number(Math.floor(Number(amount))).toLocaleString("en-US")} VNĐ\n` +
-                                (bonus > 0 ? `🎁 Khuyến mãi: +${Number(Math.floor(Number(bonus))).toLocaleString("en-US")} VNĐ\n` : '') +
-                                `🔹 Tổng cộng: ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ\n` +
-                                `💼 Số dư mới: ${Number(Math.floor(Number(newBalance))).toLocaleString("en-US")} VNĐ\n` +
+                                `💰 Số tiền: ${formatMoney(amount)} VNĐ\n` +
+                                (bonus > 0 ? `🎁 Khuyến mãi: +${formatMoney(bonus)} VNĐ\n` : '') +
+                                `🔹 Tổng cộng: ${formatMoney(totalAmount || amount)} VNĐ\n` +
+                                `💼 Số dư mới: ${formatMoney(newBalance)} VNĐ\n` +
                                 `📖 Nội dung: ${bonus > 0
-                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${Number(Math.floor(Number(totalAmount || amount))).toLocaleString("en-US")} VNĐ`}\n` +
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`}\n` +
                                 `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit", month: "2-digit", year: "numeric",
                                     hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -323,6 +561,9 @@ cron.schedule('*/15 * * * * *', async () => {
                                 console.error("Lỗi gửi thông báo Telegram user:", telegramError.message);
                             }
                         }
+                        // Xử lý hoa hồng affiliate đa cấp
+                        await processAffiliateCommission(user, amount, configweb, teleConfig, oldDepositCode);
+
                         if (bonus > 0) {
                             console.log(`🎁 ${bank.bank_name.toUpperCase()}: +${amount} (+${bonus} KM) => ${username}`);
                         } else {
@@ -337,7 +578,8 @@ cron.schedule('*/15 * * * * *', async () => {
                 console.error(`❌ Lỗi xử lý ${bank.bank_name}:`, bankError.message);
             }
         }
-
+        console.log(`✅ Cron hoàn thành`);
+        isRunning = false;
     } catch (error) {
         console.error('❌ Cron lỗi:', error.message);
     } finally {

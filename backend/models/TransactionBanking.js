@@ -4,6 +4,7 @@ const TransactionBankingSchema = new mongoose.Schema({
     transactionID: { type: String, required: true, unique: true }, // ID giao dịch (duy nhất)
     typeBank: { type: String, required: true }, // Loại ngân hàng (ví dụ: ACB, Vietcombank, v.v.)
     accountNumber: { type: String, required: true }, // Số tài khoản ngân hàng
+    code: { type: String }, // Mã nạp tiền
     username: { type: String, required: true }, // Tên người dùng liên quan đến giao dịch
     amount: { type: Number, required: true }, // Số tiền giao dịch
     description: { type: String, default: null }, // Mô tả giao dịch
