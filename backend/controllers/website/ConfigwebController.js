@@ -151,27 +151,28 @@ exports.updateConfigweb = async (req, res) => {
       return res.status(400).json({ success: false, message: "Dữ liệu lienhe phải là một mảng" });
     }
 
-    // Cập nhật cấu hình
-    config.tieude = tieude !== undefined ? tieude : "";
-    config.title = title !== undefined ? title : "";
-    config.logo = logo !== undefined ? logo : "";
-    config.daily = daily !== undefined ? daily : 1000000;
-    config.distributor = distributor !== undefined ? distributor : 10000000;
-    config.favicon = favicon !== undefined ? favicon : "";
-    config.lienhe = lienhe !== undefined ? lienhe : [];
-    config.cuphap = cuphap !== undefined ? cuphap : config.cuphap; // Cho phép cuphap rỗng
-    config.linktele = linktele !== undefined ? linktele : ""; // Kiểm tra giá trị trống cho linktele
-    config.viewluotban = viewluotban !== undefined ? viewluotban : config.viewluotban || false; // Kiểm tra giá trị trống cho viewluotban
-    config.autoactive = autoactive !== undefined ? autoactive : config.autoactive || false; // Kiểm tra giá trị trống cho autoactive
-    config.autoremove = autoremove !== undefined ? autoremove : config.autoremove || false; // Kiểm tra giá trị trống cho autoremove
-    config.autoDeleteMonths = autoDeleteMonths !== undefined ? autoDeleteMonths : config.autoDeleteMonths || 3; // Kiểm tra giá trị trống cho autoDeleteMonths
-    config.deleteOrders = deleteOrders !== undefined ? deleteOrders : config.deleteOrders || false; // Kiểm tra giá trị trống cho deleteOrders
-    config.deleteUsers = deleteUsers !== undefined ? deleteUsers : config.deleteUsers || false; // Kiểm tra giá trị trống cho deleteUsers
-    config.deleteHistory = deleteHistory !== undefined ? deleteHistory : config.deleteHistory || false; // Kiểm tra giá trị trống cho deleteHistory
-    config.headerJs = req.body.headerJs !== undefined ? req.body.headerJs : config.headerJs || "";
-    config.footerJs = req.body.footerJs !== undefined ? req.body.footerJs : config.footerJs || "";
-    config.tigia = tigia !== undefined ? tigia : 25000;
-    config.notenaptien = notenaptien !== undefined ? notenaptien : "";
+    // Cập nhật cấu hình - Chỉ cập nhật field khi nó được gửi lên (không undefined)
+    // Giữ nguyên giá trị hiện tại nếu field không được gửi
+    if (tieude !== undefined) config.tieude = tieude;
+    if (title !== undefined) config.title = title;
+    if (logo !== undefined) config.logo = logo;
+    if (daily !== undefined) config.daily = daily;
+    if (distributor !== undefined) config.distributor = distributor;
+    if (favicon !== undefined) config.favicon = favicon;
+    if (lienhe !== undefined) config.lienhe = lienhe;
+    if (cuphap !== undefined) config.cuphap = cuphap;
+    if (linktele !== undefined) config.linktele = linktele;
+    if (viewluotban !== undefined) config.viewluotban = viewluotban;
+    if (autoactive !== undefined) config.autoactive = autoactive;
+    if (autoremove !== undefined) config.autoremove = autoremove;
+    if (autoDeleteMonths !== undefined) config.autoDeleteMonths = autoDeleteMonths;
+    if (deleteOrders !== undefined) config.deleteOrders = deleteOrders;
+    if (deleteUsers !== undefined) config.deleteUsers = deleteUsers;
+    if (deleteHistory !== undefined) config.deleteHistory = deleteHistory;
+    if (req.body.headerJs !== undefined) config.headerJs = req.body.headerJs;
+    if (req.body.footerJs !== undefined) config.footerJs = req.body.footerJs;
+    if (tigia !== undefined) config.tigia = tigia;
+    if (notenaptien !== undefined) config.notenaptien = notenaptien;
     // Affiliate config
     config.affiliateEnabled = affiliateEnabled !== undefined ? affiliateEnabled : config.affiliateEnabled;
     config.affiliateMinDeposit = affiliateMinDeposit !== undefined ? affiliateMinDeposit : config.affiliateMinDeposit;
