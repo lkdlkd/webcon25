@@ -389,15 +389,14 @@ const WithdrawalRequests = () => {
                                 <Table striped bordered responsive hover>
                                     <thead className="table-primary">
                                         <tr>
-                                            <th>User</th>
-                                            <th className="text-end">Số tiền</th>
-                                            <th className="text-end">Phí</th>
-                                            <th className="text-end">Thực nhận</th>
-                                            <th className="text-center">Loại</th>
-                                            <th>TT Ngân hàng</th>
-                                            <th className="text-center">Trạng thái</th>
+                                            <th>Thao tác</th>
+                                            <th>Người dùng</th>
+                                            <th>Số tiền</th>
+                                            <th>Phí</th>
+                                            <th>Thực nhận</th>
+                                            <th>Loại</th>
+                                            <th>Trạng thái</th>
                                             <th>Thời gian</th>
-                                            {status === 'pending' && <th className="text-center">Thao tác</th>}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -406,44 +405,56 @@ const WithdrawalRequests = () => {
                                         ) : withdrawals.length > 0 ? (
                                             withdrawals.map((w) => (
                                                 <tr key={w._id}>
-                                                    <td className="aff-user">{w.username}</td>
-                                                    <td className="text-end">{formatMoney(w.amount)} đ</td>
-                                                    <td className="text-end text-muted">{formatMoney(w.fee)} đ</td>
-                                                    <td className="text-end">
+
+                                                    <td className="text-center">
+                                                        <div className="dropdown-placeholder mt-1">
+                                                            <button
+                                                                className="btn btn-primary btn-sm"
+                                                                type="button"
+                                                                data-bs-toggle="dropdown"
+                                                                aria-expanded="false"
+                                                            >
+                                                                Thao tác <i className="las la-angle-right ms-1"></i>
+                                                            </button>
+                                                            <ul className="dropdown-menu">
+                                                                {w.status === "pending" && (
+                                                                    <li>
+
+                                                                        <button
+                                                                            className="dropdown-item text-success"
+                                                                            onClick={() => handleApprove(w._id)}
+
+                                                                        >
+                                                                            Duyệt
+                                                                        </button>
+                                                                        <button
+                                                                            className="dropdown-item text-danger"
+                                                                            onClick={() => handleReject(w._id)}
+                                                                        >
+                                                                            Từ chối
+                                                                        </button>
+
+                                                                    </li>
+                                                                )}
+
+                                                            </ul>
+                                                        </div>
+                                                    </td>
+
+                                                    <td>{w.username}</td>
+                                                    <td>{formatMoney(w.amount)} đ</td>
+                                                    <td>{formatMoney(w.fee)} đ</td>
+                                                    <td>
                                                         <span className="aff-amount">{formatMoney(w.netAmount)} đ</span>
                                                     </td>
-                                                    <td className="text-center">
-                                                        {w.type === 'bank'
-                                                            ? <span className="badge bg-info">Ngân hàng</span>
-                                                            : <span className="badge bg-primary">Số dư</span>}
-                                                    </td>
-                                                    <td className="aff-bank-info">
-                                                        {w.type === 'bank' && w.bankInfo ? (
-                                                            <>
-                                                                <div><strong>{w.bankInfo.bankName}</strong></div>
-                                                                <div>{w.bankInfo.accountNumber}</div>
-                                                                <div>{w.bankInfo.accountName}</div>
-                                                            </>
-                                                        ) : '-'}
-                                                    </td>
-                                                    <td className="text-center">{getStatusBadge(w.status)}</td>
-                                                    <td className="aff-date">{formatDate(w.createdAt)}</td>
-                                                    {status === 'pending' && (
-                                                        <td className="text-center">
-                                                            <button
-                                                                className="aff-btn aff-btn-approve me-1"
-                                                                onClick={() => handleApprove(w._id)}
-                                                            >
-                                                                <i className="fas fa-check me-1"></i>Duyệt
-                                                            </button>
-                                                            <button
-                                                                className="aff-btn aff-btn-reject"
-                                                                onClick={() => handleReject(w._id)}
-                                                            >
-                                                                <i className="fas fa-times me-1"></i>Từ chối
-                                                            </button>
-                                                        </td>
-                                                    )}
+                                                    <td>{w.type === 'bank' ? <td>
+                                                        Ngân hàng: <span>{w.bankInfo?.bankName}</span> <br />
+                                                        STK: <span>{w.bankInfo?.accountNumber}</span> <br />
+                                                        Tên chủ TK: <span>{w.bankInfo?.accountName}</span>
+                                                    </td> : <span >Số dư web</span>}</td>
+                                                    <td>{getStatusBadge(w.status)}</td>
+                                                    <td>{formatDate(w.createdAt)}</td>
+
                                                 </tr>
                                             ))
                                         ) : (

@@ -42,7 +42,8 @@ function MenuUser({ user, categories, configWeb }) {
             return false;
         }
     };
-
+    const API_DOMAIN = window.location.origin; // Lấy tên miền hiện tại và thêm đường dẫn API
+    const Domain = API_DOMAIN.replace(/^https?:\/\//, ""); // Bỏ https:// hoặc http://
     const handleNavigation = () => {
         // loadingg("Vui lòng chờ...");
         // setTimeout(() => {
@@ -316,8 +317,8 @@ function MenuUser({ user, categories, configWeb }) {
                                     onError={(e) => (e.target.style.display = "none")} // Ẩn ảnh nếu không tải được
                                 />
                             ) : (
-                                <span className="text-dark " style={{ marginLeft: "80px", fontSize: "30px", fontWeight: "bold" }}>
-                                    {config.logo || "Logo"}
+                                <span className="text-dark " style={{ textAlign: "center", fontSize: "30px", fontWeight: "bold" }}>
+                                    {config.logo || Domain}
                                 </span>
                             )}
                         </Link>

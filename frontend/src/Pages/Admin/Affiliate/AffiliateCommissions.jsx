@@ -346,13 +346,13 @@ const AffiliateCommissions = () => {
                                 <Table striped bordered responsive hover>
                                     <thead className="table-primary">
                                         <tr>
+                                            <th>Thao tác</th>
                                             <th>Người nhận</th>
                                             <th>Từ</th>
                                             <th className="text-end">Nạp</th>
                                             <th className="text-end">Hoa hồng</th>
                                             <th className="text-center">Trạng thái</th>
                                             <th>Thời gian</th>
-                                            {status === 'pending' && <th className="text-center">Thao tác</th>}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -361,6 +361,36 @@ const AffiliateCommissions = () => {
                                         ) : commissions.length > 0 ? (
                                             commissions.map((c) => (
                                                 <tr key={c._id}>
+                                                    <td className="text-center">
+                                                        <div className="dropdown-placeholder mt-1">
+                                                            <button
+                                                                className="btn btn-primary btn-sm"
+                                                                type="button"
+                                                                data-bs-toggle="dropdown"
+                                                                aria-expanded="false"
+                                                            >
+                                                                Thao tác
+                                                            </button>
+                                                            <ul className="dropdown-menu">
+                                                                <li>
+                                                                    <button
+                                                                        className="dropdown-item text-success"
+                                                                        onClick={() => handleApprove(c._id)}
+                                                                    >
+                                                                        Duyệt
+                                                                    </button>
+                                                                </li>
+                                                                <li>
+                                                                    <button
+                                                                        className="dropdown-item text-danger"
+                                                                        onClick={() => handleReject(c._id)}
+                                                                    >
+                                                                        Từ chối
+                                                                    </button>
+                                                                </li>
+                                                            </ul>
+                                                        </div>
+                                                    </td>
                                                     <td className="aff-user">{c.referrerUsername}</td>
                                                     <td>{c.depositorUsername}</td>
                                                     <td className="text-end">{formatMoney(c.depositAmount)} đ</td>
@@ -370,22 +400,7 @@ const AffiliateCommissions = () => {
                                                     </td>
                                                     <td className="text-center">{getStatusBadge(c.status)}</td>
                                                     <td className="aff-date">{formatDate(c.createdAt)}</td>
-                                                    {status === 'pending' && (
-                                                        <td className="text-center">
-                                                            <button
-                                                                className="aff-btn aff-btn-approve me-1"
-                                                                onClick={() => handleApprove(c._id)}
-                                                            >
-                                                                <i className="fas fa-check me-1"></i>Duyệt
-                                                            </button>
-                                                            <button
-                                                                className="aff-btn aff-btn-reject"
-                                                                onClick={() => handleReject(c._id)}
-                                                            >
-                                                                <i className="fas fa-times me-1"></i>Từ chối
-                                                            </button>
-                                                        </td>
-                                                    )}
+
                                                 </tr>
                                             ))
                                         ) : (
