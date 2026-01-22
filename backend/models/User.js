@@ -38,6 +38,7 @@ const userSchema = new mongoose.Schema({
   referralCode: { type: String, unique: true, sparse: true, index: true }, // Mã giới thiệu của user này
   referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // User đã giới thiệu user này
   referredByCode: { type: String, default: null }, // Mã giới thiệu khi đăng ký (lưu để tra cứu)
+  commissionBalance: { type: Number, default: 0 }, // Số dư hoa hồng có thể rút (riêng biệt với balance)
   affiliateStats: {
     totalEarnings: { type: Number, default: 0 }, // Tổng hoa hồng đã nhận
     totalReferrals: { type: Number, default: 0 }, // Tổng số người đã giới thiệu (cấp 1)

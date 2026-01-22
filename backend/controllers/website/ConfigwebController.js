@@ -70,7 +70,13 @@ exports.getConfigweb = async (req, res) => {
       responseData.deleteHistory = config.deleteHistory;
       // Affiliate config
       responseData.affiliateEnabled = config.affiliateEnabled;
-
+      // Withdrawal config
+      responseData.withdrawMinAmount = config.withdrawMinAmount;
+      responseData.withdrawMaxAmount = config.withdrawMaxAmount;
+      responseData.withdrawFeePercent = config.withdrawFeePercent;
+      responseData.withdrawFeeFixed = config.withdrawFeeFixed;
+      responseData.withdrawToBankEnabled = config.withdrawToBankEnabled;
+      responseData.withdrawToBalanceEnabled = config.withdrawToBalanceEnabled;
     }
 
     res.status(200).json({ success: true, data: responseData });
@@ -137,7 +143,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien, affiliateEnabled, affiliateMinDeposit, affiliateCommissionPercent } = req.body;
+    const { tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien, affiliateEnabled, affiliateMinDeposit, affiliateCommissionPercent, withdrawMinAmount, withdrawMaxAmount, withdrawFeePercent, withdrawFeeFixed, withdrawToBankEnabled, withdrawToBalanceEnabled } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -174,9 +180,16 @@ exports.updateConfigweb = async (req, res) => {
     if (tigia !== undefined) config.tigia = tigia;
     if (notenaptien !== undefined) config.notenaptien = notenaptien;
     // Affiliate config
-    config.affiliateEnabled = affiliateEnabled !== undefined ? affiliateEnabled : config.affiliateEnabled;
-    config.affiliateMinDeposit = affiliateMinDeposit !== undefined ? affiliateMinDeposit : config.affiliateMinDeposit;
-    config.affiliateCommissionPercent = affiliateCommissionPercent !== undefined ? affiliateCommissionPercent : config.affiliateCommissionPercent;
+    if (affiliateEnabled !== undefined) config.affiliateEnabled = affiliateEnabled;
+    if (affiliateMinDeposit !== undefined) config.affiliateMinDeposit = affiliateMinDeposit;
+    if (affiliateCommissionPercent !== undefined) config.affiliateCommissionPercent = affiliateCommissionPercent;
+    // Withdrawal config
+    if (withdrawMinAmount !== undefined) config.withdrawMinAmount = withdrawMinAmount;
+    if (withdrawMaxAmount !== undefined) config.withdrawMaxAmount = withdrawMaxAmount;
+    if (withdrawFeePercent !== undefined) config.withdrawFeePercent = withdrawFeePercent;
+    if (withdrawFeeFixed !== undefined) config.withdrawFeeFixed = withdrawFeeFixed;
+    if (withdrawToBankEnabled !== undefined) config.withdrawToBankEnabled = withdrawToBankEnabled;
+    if (withdrawToBalanceEnabled !== undefined) config.withdrawToBalanceEnabled = withdrawToBalanceEnabled;
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });

@@ -372,6 +372,11 @@ function MenuUser({ user, categories, configWeb }) {
                                                         <span className="pc-mtext">Duyệt hoa hồng</span>
                                                     </Link>
                                                 </li>
+                                                <li className="pc-item">
+                                                    <Link to="/admin/withdrawal-requests" onClick={() => handleNavigation()} className="pc-link">
+                                                        <span className="pc-mtext">Duyệt rút tiền</span>
+                                                    </Link>
+                                                </li>
                                                 {/* <li className="pc-item">
                                                 <Link to="/admin/setting-thecao" className="pc-link">
                                                     <span className="pc-mtext">Cấu hình nạp thẻ</span>

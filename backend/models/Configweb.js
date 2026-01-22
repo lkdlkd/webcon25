@@ -34,6 +34,14 @@ const configwebSchema = new mongoose.Schema({
   affiliateMinDeposit: { type: Number, default: 50000 }, // Mức nạp tối thiểu để tính hoa hồng (VNĐ)
   affiliateCommissionPercent: { type: Number, default: 1 }, // 1% hoa hồng affiliate
 
+  // Withdrawal configuration (cấu hình rút hoa hồng)
+  withdrawMinAmount: { type: Number, default: 50000 },      // Rút tối thiểu
+  withdrawMaxAmount: { type: Number, default: 10000000 },   // Rút tối đa
+  withdrawFeePercent: { type: Number, default: 0 },         // Phí % rút
+  withdrawFeeFixed: { type: Number, default: 0 },           // Phí cố định
+  withdrawToBankEnabled: { type: Boolean, default: true },  // Cho phép rút về bank
+  withdrawToBalanceEnabled: { type: Boolean, default: true }, // Cho phép rút về số dư
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("Configweb", configwebSchema);

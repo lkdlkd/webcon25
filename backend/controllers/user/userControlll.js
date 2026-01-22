@@ -448,6 +448,48 @@ exports.getMe = async (req, res) => {
       return res.status(404).json({ error: "Người dùng không tồn tại" });
     }
 
+    // Kiểm tra và tạo depositCode nếu chưa có
+    if (!user.depositCode) {
+      // Retry logic để đảm bảo không bị trùng (xử lý race condition)
+      const maxRetries = 10;
+      let attempts = 0;
+      let saved = false;
+      let newCode = '';
+
+      while (attempts < maxRetries && !saved) {
+        try {
+          newCode = generateUniqueDepositCode();
+          user.depositCode = newCode;
+          await user.save();
+          saved = true;
+        } catch (saveError) {
+          // E11000 là lỗi duplicate key của MongoDB
+          if (saveError.code === 11000 && saveError.keyPattern?.depositCode) {
+            attempts++;
+            console.log(`⚠️ Mã ${newCode} bị trùng, thử lại lần ${attempts}...`);
+            continue;
+          }
+          throw saveError; // Lỗi khác thì throw
+        }
+      }
+
+      // Fallback: dùng timestamp nếu tất cả retry đều trùng
+      if (!saved) {
+        try {
+          const timestamp = Date.now().toString(36).toUpperCase();
+          const randomPart = crypto.randomBytes(4).toString('hex').toUpperCase().substring(0, 6 - timestamp.length);
+          newCode = (timestamp + randomPart).substring(0, 6);
+          user.depositCode = newCode;
+          await user.save();
+          saved = true;
+          console.log(`✅ Fallback timestamp code: ${newCode}`);
+        } catch (fallbackErr) {
+          return res.status(500).json({ error: 'Không thể tạo mã duy nhất sau nhiều lần thử' });
+        }
+      }
+    }
+
+
     // Trả về thông tin user nhưng thay token bằng apiKey
     const loginHistory = Array.isArray(user.loginHistory)
       ? user.loginHistory.slice(-10).reverse()
@@ -1129,6 +1171,7 @@ exports.getAffiliateInfo = async (req, res) => {
     return res.status(200).json({
       success: true,
       referralCode: user.referralCode,
+      commissionBalance: user.commissionBalance || 0, // Số dư hoa hồng có thể rút
       stats: {
         totalEarnings: user.affiliateStats?.totalEarnings || 0,
         monthlyEarnings: user.affiliateStats?.monthlyEarnings || 0,
@@ -1238,7 +1281,7 @@ exports.getAffiliateCommissions = async (req, res) => {
   }
 };
 
-// Duyệt hoa hồng (admin)
+// Duyệt hoa hồng (admin) - Cộng vào commissionBalance (số dư hoa hồng riêng)
 exports.approveAffiliateCommission = async (req, res) => {
   try {
     const { commissionId } = req.params;
@@ -1263,10 +1306,10 @@ exports.approveAffiliateCommission = async (req, res) => {
     const currentMonth = now.getMonth() + 1;
     const currentYear = now.getFullYear();
 
-    // Cập nhật số dư và thống kê affiliate
+    // Cập nhật số dư hoa hồng riêng (commissionBalance) và thống kê affiliate
     const updateQuery = {
       $inc: {
-        balance: commission.commissionAmount,
+        commissionBalance: commission.commissionAmount, // Cộng vào số dư hoa hồng riêng
         'affiliateStats.totalEarnings': commission.commissionAmount
       }
     };
@@ -1301,18 +1344,18 @@ exports.approveAffiliateCommission = async (req, res) => {
       madon: `AFF-${commission.depositorUsername}`,
       hanhdong: "Hoa hồng Affiliate",
       link: "",
-      tienhientai: updatedReferrer.balance - commission.commissionAmount,
+      tienhientai: (referrer.commissionBalance || 0),
       tongtien: commission.commissionAmount,
-      tienconlai: updatedReferrer.balance,
+      tienconlai: updatedReferrer.commissionBalance,
       createdAt: new Date(),
-      mota: `Hoa hồng (${commission.commissionPercent}%) từ ${commission.depositorUsername} nạp ${commission.depositAmount.toLocaleString()} VNĐ`,
+      mota: `Hoa hồng (${commission.commissionPercent}%) từ ${commission.depositorUsername} nạp ${commission.depositAmount.toLocaleString()} VNĐ → Số dư hoa hồng`,
     });
     await historyData.save();
 
     return res.status(200).json({
       success: true,
       message: `Đã duyệt hoa hồng ${commission.commissionAmount.toLocaleString()} VNĐ cho ${referrer.username}`,
-      newBalance: updatedReferrer.balance
+      newCommissionBalance: updatedReferrer.commissionBalance
     });
   } catch (error) {
     console.error('Approve affiliate commission error:', error);
@@ -1374,6 +1417,308 @@ exports.getMyPendingCommissions = async (req, res) => {
     });
   } catch (error) {
     console.error('Get my pending commissions error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// ============ COMMISSION WITHDRAWAL APIs ============
+const CommissionWithdrawal = require('../../models/CommissionWithdrawal');
+const Configweb = require('../../models/Configweb');
+
+// User yêu cầu rút hoa hồng
+exports.requestWithdrawal = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const { amount, type, bankInfo } = req.body;
+
+    // Validate input
+    if (!amount || !type) {
+      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc' });
+    }
+    if (!['bank', 'balance'].includes(type)) {
+      return res.status(400).json({ error: 'Loại rút không hợp lệ' });
+    }
+    if (type === 'bank' && (!bankInfo?.bankName || !bankInfo?.accountNumber || !bankInfo?.accountName)) {
+      return res.status(400).json({ error: 'Thiếu thông tin ngân hàng' });
+    }
+
+    // Lấy config
+    const config = await Configweb.findOne();
+    if (!config) {
+      return res.status(500).json({ error: 'Không tìm thấy cấu hình hệ thống' });
+    }
+
+    // Kiểm tra loại rút được phép
+    if (type === 'bank' && !config.withdrawToBankEnabled) {
+      return res.status(400).json({ error: 'Rút về ngân hàng đang tạm khóa' });
+    }
+    if (type === 'balance' && !config.withdrawToBalanceEnabled) {
+      return res.status(400).json({ error: 'Chuyển về số dư đang tạm khóa' });
+    }
+
+    // Kiểm tra min/max
+    if (amount < config.withdrawMinAmount) {
+      return res.status(400).json({ error: `Số tiền rút tối thiểu là ${config.withdrawMinAmount.toLocaleString()} VNĐ` });
+    }
+    if (amount > config.withdrawMaxAmount) {
+      return res.status(400).json({ error: `Số tiền rút tối đa là ${config.withdrawMaxAmount.toLocaleString()} VNĐ` });
+    }
+
+    // Lấy user
+    const user = await User.findOne({ username: currentUser.username });
+    if (!user) {
+      return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+    }
+
+    // Kiểm tra số dư
+    if ((user.commissionBalance || 0) < amount) {
+      return res.status(400).json({ error: 'Số dư hoa hồng không đủ' });
+    }
+
+    // Tính phí
+    const feePercent = (amount * (config.withdrawFeePercent || 0)) / 100;
+    const feeFixed = config.withdrawFeeFixed || 0;
+    const totalFee = feePercent + feeFixed;
+    const netAmount = amount - totalFee;
+
+    if (netAmount <= 0) {
+      return res.status(400).json({ error: 'Số tiền sau phí phải lớn hơn 0' });
+    }
+
+    // Trừ số dư hoa hồng trước
+    await User.findByIdAndUpdate(user._id, {
+      $inc: { commissionBalance: -amount }
+    });
+
+    // Tạo yêu cầu rút
+    const withdrawal = new CommissionWithdrawal({
+      user: user._id,
+      username: user.username,
+      amount,
+      fee: totalFee,
+      netAmount,
+      type,
+      bankInfo: type === 'bank' ? bankInfo : undefined,
+      status: 'pending'
+    });
+    await withdrawal.save();
+
+    // Lưu lịch sử
+    const historyData = new HistoryUser({
+      username: user.username,
+      madon: `WD-${withdrawal._id.toString().slice(-8).toUpperCase()}`,
+      hanhdong: "Yêu cầu rút hoa hồng",
+      link: "",
+      tienhientai: user.commissionBalance,
+      tongtien: amount,
+      tienconlai: user.commissionBalance - amount,
+      createdAt: new Date(),
+      mota: `Yêu cầu rút ${amount.toLocaleString()} VNĐ (phí ${totalFee.toLocaleString()}) về ${type === 'bank' ? 'ngân hàng' : 'số dư'}`,
+    });
+    await historyData.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Yêu cầu rút hoa hồng đã được gửi',
+      withdrawal: {
+        id: withdrawal._id,
+        amount,
+        fee: totalFee,
+        netAmount,
+        type,
+        status: 'pending'
+      }
+    });
+  } catch (error) {
+    console.error('Request withdrawal error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// User xem lịch sử rút hoa hồng
+exports.getMyWithdrawals = async (req, res) => {
+  try {
+    const currentUser = req.user;
+    const { page = 1, limit = 10, status } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const user = await User.findOne({ username: currentUser.username });
+    if (!user) {
+      return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+    }
+
+    const query = { user: user._id };
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    const [withdrawals, total] = await Promise.all([
+      CommissionWithdrawal.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      CommissionWithdrawal.countDocuments(query)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      withdrawals,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (error) {
+    console.error('Get my withdrawals error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Admin: Lấy danh sách yêu cầu rút
+exports.getWithdrawals = async (req, res) => {
+  try {
+    const { status = 'pending', page = 1, limit = 20, search } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = {};
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+    if (search) {
+      query.username = { $regex: search, $options: 'i' };
+    }
+
+    const [withdrawals, total] = await Promise.all([
+      CommissionWithdrawal.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      CommissionWithdrawal.countDocuments(query)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      withdrawals,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (error) {
+    console.error('Get withdrawals error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Admin: Duyệt yêu cầu rút
+exports.approveWithdrawal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adminUser = req.user;
+    const { adminNote } = req.body;
+
+    const withdrawal = await CommissionWithdrawal.findById(id);
+    if (!withdrawal) {
+      return res.status(404).json({ error: 'Không tìm thấy yêu cầu rút' });
+    }
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({ error: 'Yêu cầu đã được xử lý' });
+    }
+
+    const user = await User.findById(withdrawal.user);
+    if (!user) {
+      return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+    }
+
+    // Nếu rút về số dư web, cộng vào balance
+    if (withdrawal.type === 'balance') {
+      await User.findByIdAndUpdate(user._id, {
+        $inc: { balance: withdrawal.netAmount }
+      });
+
+      // Lưu lịch sử cộng số dư
+      const historyData = new HistoryUser({
+        username: user.username,
+        madon: `WD-${withdrawal._id.toString().slice(-8).toUpperCase()}`,
+        hanhdong: "Rút hoa hồng về số dư",
+        link: "",
+        tienhientai: user.balance,
+        tongtien: withdrawal.netAmount,
+        tienconlai: user.balance + withdrawal.netAmount,
+        createdAt: new Date(),
+        mota: `Chuyển ${withdrawal.netAmount.toLocaleString()} VNĐ từ hoa hồng về số dư (phí ${withdrawal.fee.toLocaleString()})`,
+      });
+      await historyData.save();
+    }
+    // Nếu rút về bank, admin tự chuyển manually
+
+    // Cập nhật trạng thái
+    withdrawal.status = 'approved';
+    withdrawal.processedBy = adminUser._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNote = adminNote;
+    await withdrawal.save();
+
+    return res.status(200).json({
+      success: true,
+      message: withdrawal.type === 'balance'
+        ? `Đã chuyển ${withdrawal.netAmount.toLocaleString()} VNĐ về số dư của ${user.username}`
+        : `Đã duyệt yêu cầu rút ${withdrawal.netAmount.toLocaleString()} VNĐ về ngân hàng`
+    });
+  } catch (error) {
+    console.error('Approve withdrawal error:', error);
+    return res.status(500).json({ error: 'Có lỗi xảy ra' });
+  }
+};
+
+// Admin: Từ chối yêu cầu rút (hoàn tiền về commissionBalance)
+exports.rejectWithdrawal = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adminUser = req.user;
+    const { adminNote } = req.body;
+
+    const withdrawal = await CommissionWithdrawal.findById(id);
+    if (!withdrawal) {
+      return res.status(404).json({ error: 'Không tìm thấy yêu cầu rút' });
+    }
+    if (withdrawal.status !== 'pending') {
+      return res.status(400).json({ error: 'Yêu cầu đã được xử lý' });
+    }
+
+    // Hoàn tiền về commissionBalance (hoàn cả amount gốc, không trừ phí)
+    await User.findByIdAndUpdate(withdrawal.user, {
+      $inc: { commissionBalance: withdrawal.amount }
+    });
+
+    // Cập nhật trạng thái
+    withdrawal.status = 'rejected';
+    withdrawal.processedBy = adminUser._id;
+    withdrawal.processedAt = new Date();
+    withdrawal.adminNote = adminNote || 'Admin từ chối';
+    await withdrawal.save();
+
+    // Lưu lịch sử hoàn tiền
+    const user = await User.findById(withdrawal.user);
+    const historyData = new HistoryUser({
+      username: user.username,
+      madon: `WD-${withdrawal._id.toString().slice(-8).toUpperCase()}`,
+      hanhdong: "Hoàn tiền yêu cầu rút",
+      link: "",
+      tienhientai: (user.commissionBalance || 0) - withdrawal.amount,
+      tongtien: withdrawal.amount,
+      tienconlai: user.commissionBalance,
+      createdAt: new Date(),
+      mota: `Hoàn ${withdrawal.amount.toLocaleString()} VNĐ - Lý do: ${adminNote || 'Admin từ chối'}`,
+    });
+    await historyData.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã từ chối và hoàn ${withdrawal.amount.toLocaleString()} VNĐ về số dư hoa hồng`
+    });
+  } catch (error) {
+    console.error('Reject withdrawal error:', error);
     return res.status(500).json({ error: 'Có lỗi xảy ra' });
   }
 };

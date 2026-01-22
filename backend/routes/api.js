@@ -84,7 +84,17 @@ router.get('/affiliate/pending', authenticate.authenticateUser, user.getMyPendin
 router.get('/admin/affiliate/commissions', authenticate.authenticateAdmin, user.getAffiliateCommissions); // Lấy tất cả các khoản hoa hồng affiliate
 router.post('/admin/affiliate/approve/:commissionId', authenticate.authenticateAdmin, user.approveAffiliateCommission); // Phê duyệt hoa hồng affiliate
 router.post('/admin/affiliate/reject/:commissionId', authenticate.authenticateAdmin, user.rejectAffiliateCommission); // Từ chối hoa hồng affiliate
-router.get('/server', authenticate.authenticateUser, server.getServer); // Lấy thông tin lịch sử thẻ cào theo ID người dùng
+
+// Commission Withdrawal routes (User)
+router.post('/affiliate/withdraw', authenticate.authenticateUser, user.requestWithdrawal); // User yêu cầu rút hoa hồng
+router.get('/affiliate/withdrawals', authenticate.authenticateUser, user.getMyWithdrawals); // User xem lịch sử rút
+
+// Commission Withdrawal routes (Admin)
+router.get('/admin/affiliate/withdrawals', authenticate.authenticateAdmin, user.getWithdrawals); // Admin xem tất cả yêu cầu rút
+router.post('/admin/affiliate/withdraw/approve/:id', authenticate.authenticateAdmin, user.approveWithdrawal); // Admin duyệt yêu cầu rút
+router.post('/admin/affiliate/withdraw/reject/:id', authenticate.authenticateAdmin, user.rejectWithdrawal); // Admin từ chối yêu cầu rút
+
+router.get('/server', authenticate.authenticateUser, server.getServer); // Lấy thông tin server
 router.get('/servers', authenticate.authenticateUser, server.getServerByTypeAndPath);
 // admin services
 router.post('/smm/create', authenticate.authenticateAdmin, smm.createPartner); // ok Thêm mới đối tác SMM
