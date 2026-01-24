@@ -340,7 +340,7 @@ export default function AffiliatePanel({ token }) {
                                                     <h6 className="text-primary mb-3"><i className="fas fa-coins me-2"></i>Điều kiện nhận hoa hồng</h6>
                                                     <ul className="mb-0 ps-3 small">
                                                         <li className="mb-2">Người được giới thiệu phải đăng ký bằng mã/link của bạn</li>
-                                                        <li className="mb-2">Chỉ tính hoa hồng cho người giới thiệu <strong>trực tiếp</strong> (cấp 1)</li>
+                                                        <li className="mb-2">Chỉ tính hoa hồng cho người giới thiệu <strong>trực tiếp</strong></li>
                                                         <li className="mb-2">Mỗi lần nạp tiền ≥ <strong>{formatMoney(configWeb?.affiliateMinDeposit || 0)} đ</strong> sẽ được tính hoa hồng</li>
                                                         <li className="mb-2">Hoa hồng = <strong>{configWeb?.affiliateCommissionPercent || 0}%</strong> số tiền nạp của người được giới thiệu</li>
                                                         <li>Hoa hồng cần được admin <strong>duyệt</strong> trước khi có thể rút</li>
@@ -429,7 +429,7 @@ export default function AffiliatePanel({ token }) {
                                             <div>
                                                 <strong>Lưu ý quan trọng:</strong>
                                                 <ul className="mb-0 mt-2 ps-3">
-                                                    <li>Chỉ tính hoa hồng cho người được giới thiệu <strong>trực tiếp</strong> (cấp 1)</li>
+                                                    <li>Chỉ tính hoa hồng cho người được giới thiệu <strong>trực tiếp</strong></li>
                                                     <li>Hoa hồng sẽ <strong>chờ admin duyệt</strong> trước khi có thể rút</li>
                                                     <li>Đảm bảo nhập <strong>chính xác thông tin ngân hàng</strong> khi rút tiền</li>
                                                     <li>Liên hệ admin nếu có thắc mắc về hoa hồng hoặc yêu cầu rút tiền</li>
@@ -686,9 +686,9 @@ export default function AffiliatePanel({ token }) {
                                                     {pendingInfo.pendingCommissions.map((c) => (
                                                         <tr key={c._id}>
                                                             <td><strong>{c.depositorUsername}</strong></td>
-                                                            <td className="text-end">{formatMoney(c.depositAmount)} đ</td>
-                                                            <td className="text-end text-success fw-bold">+{formatMoney(c.commissionAmount)} đ ({c.commissionPercent}%)</td>
-                                                            <td><small className="text-muted">{new Date(c.createdAt).toLocaleString('vi-VN')}</small></td>
+                                                            <td className="text-end">{formatMoney(c.depositAmount)}</td>
+                                                            <td className="text-end text-success fw-bold">+{formatMoney(c.commissionAmount)} ({c.commissionPercent}%)</td>
+                                                            <td>{new Date(c.createdAt).toLocaleString('vi-VN')}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>

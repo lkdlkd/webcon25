@@ -42,6 +42,9 @@ const configwebSchema = new mongoose.Schema({
   withdrawToBankEnabled: { type: Boolean, default: true },  // Cho phép rút về bank
   withdrawToBalanceEnabled: { type: Boolean, default: true }, // Cho phép rút về số dư
 
+  // Deposit matching type
+  depositMatchType: { type: String, enum: ['code', 'username'], default: 'code' }, // 'code' = dùng mã nạp tiền, 'username' = dùng username
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("Configweb", configwebSchema);

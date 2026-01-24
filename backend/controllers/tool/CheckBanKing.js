@@ -143,6 +143,30 @@ function extractDepositCode(description, cuphap) {
     }
 }
 
+// Hàm trích xuất username từ nội dung chuyển khoản (BẮT BUỘC phải có cuphap)
+function extractUsername(description, cuphap) {
+    try {
+        // Không có cuphap thì không tìm để tránh match sai
+        if (!cuphap || cuphap.trim() === "") {
+            return null;
+        }
+
+        // Loại bỏ các ký tự đặc biệt, chỉ giữ alphanumeric và space
+        const cleanDesc = description.replace(/[^a-zA-Z0-9\s]/g, ' ').toUpperCase();
+
+        // Tìm theo pattern "cuphap USERNAME"
+        const regex = new RegExp(`${cuphap}\\s+([A-Z0-9]+)`, "i");
+        const match = cleanDesc.match(regex);
+        if (match && match[1]) {
+            return match[1].toLowerCase();
+        }
+        return null;
+    } catch (error) {
+        console.error("Lỗi extractUsername:", error.message);
+        return null;
+    }
+}
+
 // Hàm tính tiền thưởng khuyến mãi - KHÔNG QUERY DB
 function calculateBonus(amount, promotions) {
     if (!promotions || promotions.length === 0) {
@@ -270,6 +294,7 @@ cron.schedule('*/15 * * * * *', async () => {
         // Refresh cache trước khi xử lý
         const { configweb, telegram: teleConfig, promotions } = await refreshCache();
         const cuphap = configweb?.cuphap || "";
+        const depositMatchType = configweb?.depositMatchType || 'code'; // 'code' or 'username'
         const vipThreshold = Number(configweb?.daily) || 0;
         const distributorThreshold = Number(configweb?.distributor) || 0;
 
@@ -310,8 +335,7 @@ cron.schedule('*/15 * * * * *', async () => {
                         continue; // Bỏ qua nếu giao dịch đã được xử lý
                     }
 
-                    // Trích xuất depositCode từ description
-                    const extractResult = extractDepositCode(trans.description, cuphap);
+                    // Trích xuất thông tin từ description dựa trên depositMatchType
                     let depositCode = null;
                     let user = null;
                     let username = null;
@@ -320,19 +344,42 @@ cron.schedule('*/15 * * * * *', async () => {
                     let promo = null;
                     const amount = parseFloat(trans.amount); // Đảm bảo là Number
 
-                    if (trans.type === 'IN' && extractResult) {
-                        // extractResult có thể là string (khi có cuphap) hoặc array (khi không có cuphap)
-                        const potentialCodes = Array.isArray(extractResult) ? extractResult : [extractResult];
+                    if (trans.type === 'IN') {
+                        if (depositMatchType === 'username' && cuphap && cuphap.trim() !== '') {
+                            // Tìm theo USERNAME (chỉ khi có cuphap để tránh match sai)
+                            const extractedUsername = extractUsername(trans.description, cuphap);
+                            if (extractedUsername) {
+                                const foundUser = await User.findOne({ username: extractedUsername });
+                                if (foundUser) {
+                                    user = foundUser;
+                                    username = foundUser.username;
+                                    depositCode = foundUser.depositCode; // Lưu lại để reference
+                                    console.log(`✅ Tìm thấy user theo username: ${username}`);
+                                } else {
+                                    console.log(`⚠️ Không tìm thấy user với username: ${extractedUsername}`);
+                                }
+                            }
+                        } else {
+                            // Tìm theo DEPOSIT CODE (mặc định)
+                            const extractResult = extractDepositCode(trans.description, cuphap);
+                            if (extractResult) {
+                                const potentialCodes = Array.isArray(extractResult) ? extractResult : [extractResult];
 
-                        // Tìm user với depositCode hợp lệ
-                        for (const code of potentialCodes) {
-                            const foundUser = await User.findOne({ depositCode: code });
-                            if (foundUser) {
-                                depositCode = code;
-                                user = foundUser;
-                                username = foundUser.username;
-                                console.log(`✅ Tìm thấy mã nạp tiền hợp lệ: ${code}`);
-                                break;
+                                // Tìm user với depositCode hợp lệ
+                                for (const code of potentialCodes) {
+                                    const foundUser = await User.findOne({ depositCode: code });
+                                    if (foundUser) {
+                                        depositCode = code;
+                                        user = foundUser;
+                                        username = foundUser.username;
+                                        console.log(`✅ Tìm thấy mã nạp tiền hợp lệ: ${code}`);
+                                        break;
+                                    }
+                                }
+
+                                if (!user) {
+                                    console.log(`⚠️ Không tìm thấy user với các mã: ${potentialCodes.join(', ')}`);
+                                }
                             }
                         }
 
@@ -343,9 +390,7 @@ cron.schedule('*/15 * * * * *', async () => {
                             promo = bonusResult.promo;
                             totalAmount = amount + bonus;
                             console.log(bonusResult);
-                            console.log(`Giao dịch: ${trans.transactionID}, DepositCode: ${depositCode}, User: ${username}, Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
-                        } else {
-                            console.log(`⚠️ Không tìm thấy user với các mã: ${potentialCodes.join(', ')}`);
+                            console.log(`Giao dịch: ${trans.transactionID}, MatchType: ${depositMatchType}, User: ${username}, Amount: ${amount}, Bonus: ${bonus}, Total: ${totalAmount}`);
                         }
                     } else if (trans.type !== 'IN') {
                         if (!extractResult) {
@@ -361,6 +406,7 @@ cron.schedule('*/15 * * * * *', async () => {
                         accountNumber: bank.account_number,
                         transactionID: trans.transactionID,
                     };
+                    const matchIdentifier = depositMatchType === 'username' ? username : depositCode;
                     const noteText = (trans.type === 'IN' && user)
                         ? (bonus > 0
                             ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${amount} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
@@ -375,7 +421,7 @@ cron.schedule('*/15 * * * * *', async () => {
                                 accountNumber: bank.account_number,
                                 transactionID: trans.transactionID,
                                 username: username || "unknown",
-                                code: depositCode,
+                                code: matchIdentifier, // Lưu username hoặc depositCode tùy theo mode
                                 amount: amount,
                                 description: trans.description,
                                 transactionDate: trans.transactionDate,
@@ -483,16 +529,20 @@ cron.schedule('*/15 * * * * *', async () => {
 
                         const historyData = new HistoryUser({
                             username,
-                            madon: oldDepositCode,
+                            madon: matchIdentifier || oldDepositCode,
                             hanhdong: "Cộng tiền",
                             link: "",
                             tienhientai: tiencu,
                             tongtien: (totalAmount || amount),
                             tienconlai: newBalance,
                             createdAt: new Date(),
-                            mota: bonus > 0
-                                ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`,
+                            mota: depositMatchType === 'code'
+                                ? (bonus > 0
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`)
+                                : (bonus > 0
+                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ`),
                         });
                         await historyData.save();
 
@@ -501,9 +551,13 @@ cron.schedule('*/15 * * * * *', async () => {
                             newDepositCode,
                             username,
                             newBalance,
-                            message: bonus > 0
-                                ? `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode} + ${formatMoney(bonus)} VNĐ khuyến mãi`
-                                : `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode}`,
+                            message: depositMatchType === 'code'
+                                ? (bonus > 0
+                                    ? `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode} + ${formatMoney(bonus)} VNĐ khuyến mãi`
+                                    : `Nạp tiền thành công ${formatMoney(amount)} VNĐ mã giao dịch ${oldDepositCode}`)
+                                : (bonus > 0
+                                    ? `Nạp tiền thành công ${formatMoney(amount)} VNĐ + ${formatMoney(bonus)} VNĐ khuyến mãi`
+                                    : `Nạp tiền thành công ${formatMoney(amount)} VNĐ`),
                             timestamp: new Date(),
                         });
 
@@ -516,9 +570,13 @@ cron.schedule('*/15 * * * * *', async () => {
                                 `👤 Khách hàng: ${username}\n` +
                                 `💰 Số tiền nạp: ${formatMoney(amount)}\n` +
                                 `🎁 Khuyến mãi: ${formatMoney(bonus)}\n` +
-                                `📖 Nội dung: ${bonus > 0
-                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và mã giao dịch ${oldDepositCode} áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và mã giao dịch ${oldDepositCode}`}\n` +
+                                `📖 Nội dung: ${depositMatchType === 'code'
+                                    ? (bonus > 0
+                                        ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                        : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`)
+                                    : (bonus > 0
+                                        ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                        : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ`)}\n` +
                                 `🔹 Tổng cộng: ${formatMoney(totalAmount || amount)}\n` +
                                 `🔹 Số dư: ${formatMoney(newBalance)} VNĐ\n` +
                                 `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
@@ -548,9 +606,13 @@ cron.schedule('*/15 * * * * *', async () => {
                                 (bonus > 0 ? `🎁 Khuyến mãi: +${formatMoney(bonus)} VNĐ\n` : '') +
                                 `🔹 Tổng cộng: ${formatMoney(totalAmount || amount)} VNĐ\n` +
                                 `💼 Số dư mới: ${formatMoney(newBalance)} VNĐ\n` +
-                                `📖 Nội dung: ${bonus > 0
-                                    ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
-                                    : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`}\n` +
+                                `📖 Nội dung: ${depositMatchType === 'code'
+                                    ? (bonus > 0
+                                        ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode} và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                        : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ mã giao dịch ${oldDepositCode}`)
+                                    : (bonus > 0
+                                        ? `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ và áp dụng khuyến mãi ${promo?.percentBonus || 0}%`
+                                        : `Hệ thống ${bank.bank_name} tự động cộng thành công số tiền ${formatMoney(totalAmount || amount)} VNĐ`)}\n` +
                                 `⏰ Thời gian: ${taoluc.toLocaleString("vi-VN", {
                                     day: "2-digit", month: "2-digit", year: "numeric",
                                     hour: "2-digit", minute: "2-digit", second: "2-digit",
