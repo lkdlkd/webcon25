@@ -102,11 +102,15 @@ function extractDepositCode(description, cuphap) {
         if (cuphap && cuphap.trim() !== "") {
             // Nếu có cuphap, tìm theo pattern "cuphap DEPOSITCODE"
             // Hỗ trợ trường hợp deposit code bị space (VD: "donate 2S2 RLX" -> "2S2RLX")
-            const regex = new RegExp(`${cuphap}\\s+([A-Z0-9\\s]{6,10})`, "i");
+            // Match đúng 6 ký tự alphanumeric (có thể có space giữa chúng)
+            // (?:[A-Z0-9]\s*){6} = 6 lần: [chữ/số] + [0 hoặc nhiều space]
+            // (?:[^A-Z0-9]|$) = kết thúc bằng ký tự KHÔNG phải alphanumeric hoặc end (cho phép -, ., etc)
+            const regex = new RegExp(`${cuphap}\\s+((?:[A-Z0-9]\\s*){6})(?:[^A-Z0-9]|$)`, "i");
             const match = description.match(regex);
             if (match) {
-                // Loại bỏ space và lấy 6 ký tự đầu
-                const code = match[1].replace(/\s+/g, '').substring(0, 6).toUpperCase();
+                // Loại bỏ tất cả space
+                const code = match[1].replace(/\s+/g, '').toUpperCase();
+                // Đảm bảo đúng 6 ký tự
                 if (code.length === 6) {
                     return code;
                 }
