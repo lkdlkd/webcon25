@@ -3,9 +3,8 @@ import { loadingg } from "@/JS/Loading";
 import { deleteServer, getAllSmmPartners, getServer, updatePartnerPrices, Dongbo } from "@/Utils/api";
 import { useEffect, useState } from "react";
 import Table from "react-bootstrap/Table";
-import { useOutletContext } from "react-router-dom";
+import { useOutletContext, useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
-import Adddichvu from "./Adddichvu";
 import EditModal from "./EditModal";
 
 export default function Dichvupage() {
@@ -26,8 +25,8 @@ export default function Dichvupage() {
   const [showEditModal, setShowEditModal] = useState(false); // Trạng thái hiển thị modal chỉnh sửa
   const [selectedService, setSelectedService] = useState(null); // Dịch vụ được chọn để chỉnh sửa
   const [quickAddMode, setQuickAddMode] = useState(true); // <--- ADD THIS
-  const [showAddModal, setShowAddModal] = useState(false); // Trạng thái hiển thị modal thêm dịch vụ
   const [isSearching, setIsSearching] = useState(false); // Trạng thái tìm kiếm
+  const navigate = useNavigate(); // Navigation hook
   // Lấy danh sách nền tảng duy nhất
   const platforms = Array.from(new Set(servers.map((s) => s.type)));
   const [selectedType, setSelectedType] = useState("");
@@ -691,7 +690,7 @@ export default function Dichvupage() {
                         <button
                           type="button"
                           className="btn service-btn-primary"
-                          onClick={() => setShowAddModal(true)}
+                          onClick={() => navigate('/admin/server/add')}
                         >
                           <i className="fas fa-plus me-2"></i>
                           Thêm dịch vụ
@@ -932,20 +931,6 @@ export default function Dichvupage() {
                   </div>
                 </div>
               </div>
-              <Adddichvu
-                fetchServers={fetchServers}
-                show={showAddModal}
-                onClose={() => setShowAddModal(false)}
-                categories={categories}
-                token={token}
-                editMode={false}
-                initialData={{}}
-                datasmm={smmPartners}
-                onSuccess={() => {
-                  setShowAddModal(false);
-                  fetchServers();
-                }}
-              />
 
               {/* Tìm kiếm và Bộ lọc gộp chung */}
               <div className="card border-0 shadow-sm mb-3">
