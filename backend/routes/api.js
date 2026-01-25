@@ -171,6 +171,14 @@ router.post('/admin/sync-services', authenticate.authenticateAdmin, async (req, 
     res.status(500).json({ success: false, message: 'Lỗi khi đồng bộ services', error: error.message });
   }
 });
+const { simpleSyncController } = require('@/controllers/tool/simpleSyncFromSmm');
+
+
+// Sync from specific SMM partner
+router.post('/admin/sync-services/:smmId', authenticate.authenticateAdmin, simpleSyncController);
+
+// Simple sync from specific SMM partner (with services data in body)
+
 
 router.get('/promotions', authenticate.authenticateUser, getPromotions);
 router.post('/promotions', authenticate.authenticateAdmin, createPromotion);

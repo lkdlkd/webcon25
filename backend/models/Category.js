@@ -10,6 +10,7 @@ const categorySchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now }, // Ngày tạo
   updated_at: { type: Date, default: Date.now }, // Ngày cập nhật
   domain: { type: String, default: null },
+  idSmm: { type: String, default: null }, // ID từ API SMM
   thutu: { type: Number, default: 4 }, // Thứ tự hiển thị
 });
 

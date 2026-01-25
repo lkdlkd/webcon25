@@ -128,7 +128,9 @@ function App() {
                 <Route path="/admin/dich-vu" element={<CategoriesPage />} />
               )}
               <Route path="/admin/server" element={<Dichvupage />} />
-              <Route path="/admin/server/add" element={<Adddichvu />} />
+              {!isAllowedApiUrl && (
+                <Route path="/admin/server/add" element={<Adddichvu />} />
+              )}
               <Route path="/admin/setting" element={<Setting />} />
               {/* <Route path="/admin/setting-thecao" element={<ConfigCard />} /> */}
               <Route path="/admin/khuyen-mai" element={<Khuyenmai />} />

@@ -23,15 +23,15 @@ function getEffectiveRate(service, user) {
     }
 }
 
-/* Hàm lấy danh sách dịch vụ */
+/* Hàm lấy danh sách dịch vụ với cấu trúc platform → category → services */
 exports.getServiceswebcon = async (req, res) => {
     try {
         const { key } = req.body;
         // Kiểm tra xem token có được gửi không
-        // Kiểm tra xem token có được gửi không
         if (!key) {
             return res.status(400).json({ success: false, error: "Token không được bỏ trống" });
         }
+
         // Lấy user từ DB dựa trên userId từ decoded token
         const user = await User.findOne({ apiKey: key });
         if (!user) {
@@ -44,32 +44,72 @@ exports.getServiceswebcon = async (req, res) => {
             res.status(401).json({ error: 'api Key không hợp lệ1' });
             return null;
         }
-        // Kiểm tra trạng thái người dùng trong CSDL (ví dụ: 'active')
+
+        // Kiểm tra trạng thái người dùng trong CSDL
         if (!user) {
             return res.status(404).json({ success: false, error: "Không tìm thấy người dùng" });
         }
         if (user.status && user.status !== 'active') {
             return res.status(403).json({ success: false, error: "Người dùng không hoạt động" });
         }
+
         // Lấy danh sách dịch vụ từ CSDL
         const services = await Service.find()
-            .populate("category", "name path thutu notes modal_show status")
-            .populate("type", "name thutu status"); // Lấy thông tin của Platform
-        // Định dạng các trường cần hiển thị với giá theo cấp bậc
-        const formattedServices = services.map(service => {
+            .populate({
+                path: "category",
+                select: "name path thutu notes modal_show status platforms_id",
+                populate: {
+                    path: "platforms_id",
+                    select: "name thutu status logo"
+                }
+            });
+
+        // Gom nhóm services theo platform và category
+        const platformMap = new Map();
+
+        services.forEach(service => {
+            if (!service.category || !service.category.platforms_id) return;
+
+            const platformObj = service.category.platforms_id;
+            const platformId = platformObj._id.toString();
+            const categoryId = service.category._id.toString();
+
+            // Tạo platform nếu chưa có
+            if (!platformMap.has(platformId)) {
+                platformMap.set(platformId, {
+                    platform_id: platformId,
+                    platform_name: platformObj.name,
+                    platform_logo: platformObj.logo || "",
+                    platform_thutu: platformObj.thutu || 0,
+                    platform_status: platformObj.status !== undefined ? platformObj.status : true,
+                    categories: new Map()
+                });
+            }
+
+            const platform = platformMap.get(platformId);
+
+            // Tạo category trong platform nếu chưa có
+            if (!platform.categories.has(categoryId)) {
+                platform.categories.set(categoryId, {
+                    category_id: categoryId,
+                    category_name: service.category.name,
+                    category_path: service.category.path,
+                    category_thutu: service.category.thutu || 0,
+                    category_status: service.category.status !== undefined ? service.category.status : true,
+                    category_notes: service.category.notes || "",
+                    category_modal_show: service.category.modal_show || "",
+                    services: []
+                });
+            }
+
+            const category = platform.categories.get(categoryId);
+
+            // Thêm service vào category
             const rateForUser = getEffectiveRate(service, user);
-            return {
-                service: Number(service.Magoi),
-                name: service.name,
-                type: service.comment === "on" ? "Custom Comments" : "Default",
-                platform: service.type?.name || "không xác định",
-                thututype: service.type?.thutu || 0,
-                statustype: service.type?.status || true,
-                category: `${service.type?.name || "Không xác định"} | ${service.category?.name || "Không xác định"}`,
-                thutucategory: service.category?.thutu || 0,
-                notecategory: service.category?.notes || "",
-                modal_show: service.category?.modal_show || "",
-                statuscategory: service.category?.status || true,
+            category.services.push({
+                service_id: Number(service.Magoi),
+                service_name: service.name,
+                service_type: service.comment === "on" ? "Custom Comments" : "Default",
                 rate: rateForUser,
                 description: service.description || "",
                 min: service.min,
@@ -82,13 +122,19 @@ exports.getServiceswebcon = async (req, res) => {
                 thutu: service.thutu || "",
                 getid: service.getid === "on",
                 comment: service.comment === "on",
-                path: service.category?.path || "",
-                isActive: service.isActive || false,
-                status: service.status || true,
-            };
+                isActive: service.isActive !== undefined ? service.isActive : true,
+                status: service.status !== undefined ? service.status : true,
+            });
         });
 
-        return res.status(200).json(formattedServices);
+        // Chuyển Map sang Array và sort
+        const result = Array.from(platformMap.values()).map(platform => ({
+            ...platform,
+            categories: Array.from(platform.categories.values())
+                .sort((a, b) => a.category_thutu - b.category_thutu)
+        })).sort((a, b) => a.platform_thutu - b.platform_thutu);
+
+        return res.status(200).json(result);
     } catch (error) {
         console.error("Lỗi khi lấy danh sách dịch vụ:", error);
         return res.status(500).json({
