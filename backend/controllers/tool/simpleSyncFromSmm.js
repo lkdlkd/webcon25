@@ -12,7 +12,7 @@ const categoryCache = new Map();
 
 // Platform logos mapping
 const PLATFORM_LOGOS = {
-    FACEBOOK: "https://upload.wikimedia.org/wikipedia/commons/5/51/Facebook_f_logo_%282019%29.svg",
+    FACEBOOK: "https://upload.wikimedia.org/wikipedia/commons/b/b8/2021_Facebook_icon.svg",
     TIKTOK: "https://upload.wikimedia.org/wikipedia/en/a/a9/TikTok_logo.svg",
     INSTAGRAM: "https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png",
     YOUTUBE: "https://upload.wikimedia.org/wikipedia/commons/0/09/YouTube_full-color_icon_%282017%29.svg",
@@ -31,7 +31,7 @@ async function sendPriceUpdateNotification(service, oldRate, newPrices, previous
 
         const createdAtVN = new Date(Date.now() + 7 * 60 * 60 * 1000);
         const telegramMessage =
-            `📌 *Cập nhật giá ${direction}!*\n` +
+            `📌 *Cập nhật giá đồng bộ ${direction}!*\n` +
             `🔹 *Mã gói:* ${service.Magoi}\n` +
             `👤 *Dịch vụ:* ${service.name}\n` +
             `🔹 *Giá cũ (Member):* ${oldRate}\n` +
@@ -97,39 +97,50 @@ async function findOrCreateCategory(categoryName, platformId) {
     const parts = categoryName.split("|");
     const cleanCategoryName = parts.length > 1 ? parts[1].trim() : categoryName.trim();
 
-    // Tự động tạo path từ category name
-    const path = cleanCategoryName
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s]/g, "")
-        .replace(/\s+/g, "-");
-
-    // Tạo cache key
-    const cacheKey = `${platformId}_${path}`;
+    // Tạo cache key theo tên (vì path có thể thay đổi suffix)
+    const cacheKey = `${platformId}_${cleanCategoryName}`;
 
     // Kiểm tra cache trước
     if (categoryCache.has(cacheKey)) {
         return categoryCache.get(cacheKey);
     }
 
-    // Tìm category theo path và platformId
+    // Tìm category theo TÊN và platformId
+    // (Ưu tiên tìm theo tên vì path có thể đã bị thêm suffix số để đảm bảo unique)
     let category = await Category.findOne({
-        path: path,
+        name: cleanCategoryName,
         platforms_id: platformId
     });
 
     if (!category) {
+        // Tự động tạo path từ category name
+        let basePath = cleanCategoryName
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9\s]/g, "")
+            .replace(/\s+/g, "-");
+
+        if (!basePath) basePath = "category";
+
+        // Đảm bảo path là duy nhất trong toàn bộ hệ thống
+        let uniquePath = basePath;
+        let counter = 1;
+        while (await Category.findOne({ path: uniquePath })) {
+            uniquePath = `${basePath}-${counter}`;
+            counter++;
+        }
+
         category = await Category.create({
             platforms_id: platformId,
             name: cleanCategoryName,
-            path: path,
+            path: uniquePath,
             status: true,
             thutu: 4,
             notes: "",
             modal_show: ""
         });
-        console.log(`✅ Tạo mới Category: ${cleanCategoryName} (path: ${path})`);
+        console.log(`✅ Tạo mới Category: ${cleanCategoryName} (path: ${uniquePath})`);
     }
 
     // Lưu vào cache
@@ -270,6 +281,21 @@ async function simpleSyncFromSmm(smmSv) {
                         existingService.name = serviceData.name; // usually synced
                         hasChanges = true;
                     }
+
+                    // Check Cancel/Refill
+                    const normalizeBool = (val) => ["1", "true", "on", 1, true].includes(val) ? "on" : "off";
+                    const newCancel = normalizeBool(serviceData.cancel);
+                    const newRefill = normalizeBool(serviceData.refill);
+
+                    if (existingService.cancel !== newCancel) {
+                        existingService.cancel = newCancel;
+                        hasChanges = true;
+                    }
+                    if (existingService.refil !== newRefill) {
+                        existingService.refil = newRefill;
+                        hasChanges = true;
+                    }
+
                     // Price check
                     const previousOriginal = Number(existingService.originalRate) || 0;
                     const dbRate = Number(existingService.rate);
@@ -330,15 +356,15 @@ async function simpleSyncFromSmm(smmSv) {
                         rateDistributor: rateDistributor,
                         min: Number(serviceData.min) || 0,
                         max: Number(serviceData.max) || 0,
-                        cancel: serviceData.cancel ? "on" : "off",
-                        refil: serviceData.refill ? "on" : "off",
+                        cancel: ["1", "true", "on", 1, true].includes(serviceData.cancel) ? "on" : "off",
+                        refil: ["1", "true", "on", 1, true].includes(serviceData.refill) ? "on" : "off",
                         isActive: true,
                         status: true,
                         maychu: "",
                         tocdodukien: "",
                         luotban: 0,
                         thutu: "4",
-                        getid: "on",
+                        getid: "off",
                         comment: commentSetting,
                         description: ""
                     });

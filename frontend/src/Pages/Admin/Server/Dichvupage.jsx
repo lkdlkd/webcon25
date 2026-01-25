@@ -110,6 +110,17 @@ export default function Dichvupage() {
       return;
     }
 
+    const result = await Swal.fire({
+      title: "Xác nhận đồng bộ?",
+      text: " Hệ thống sẽ tự động đồng bộ tất cả dịch vụ từ API vào website của bạn (phù hợp cho website chỉ kết nối duy nhất 1 API) ( Nếu bạn có nhiều hơn 1 API thì không nên sử dụng tránh xung đột)",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Đồng bộ",
+      cancelButtonText: "Hủy",
+    });
+
+    if (!result.isConfirmed) return;
+
     setSyncing(true);
     loadingg("Đang đồng bộ d\u1ecbch v\u1ee5...", true, 999999);
 

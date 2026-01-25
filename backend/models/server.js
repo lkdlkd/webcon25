@@ -22,13 +22,13 @@ const serviceSchema = new mongoose.Schema({
   Linkdv: { type: String, required: false },//facebook-like, tiktok-view... // ko tác dụng
   tocdodukien: { type: String, required: false },//tốc độ dự kiến
   luotban: { type: Number, default: 0 },//lượt bán
-  chietkhau: { type: Number, required: false , default: 0 },//chiết khấu %
+  chietkhau: { type: Number, required: false, default: 0 },//chiết khấu %
   serviceId: { type: String, required: true },//sv ở bên thứ 3
-  thutu: { type: String, required: false , default: 4 },// thứ tự
+  thutu: { type: String, required: false, default: 4 },// thứ tự
   //option
   refil: { type: String, enum: ["on", "off"], default: "off" },//chức năng refil
   cancel: { type: String, enum: ["on", "off"], default: "off" },//chức năng hủy đơn
-  getid: { type: String, enum: ["on", "off"], default: "on" },//chức năng get id sau khi nhập link mua
+  getid: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   comment: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   reaction: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
   matlive: { type: String, enum: ["on", "off"], default: "off" },//chức năng get id sau khi nhập link mua
