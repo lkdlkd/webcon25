@@ -694,7 +694,7 @@ export default function Ordernhanh() {
                     <span className="font-semibold"> {s.logo && (
                         <img src={s.logo} alt={s.name} style={{ width: 24, height: 24, objectFit: 'contain' }} />
                     )} <strong className="badge bg-info">[{s.Magoi}]</strong> - {s.maychu} <span style={{ lineHeight: "1.2", verticalAlign: "middle" }} dangerouslySetInnerHTML={{ __html: s.name }} /> <span className="badge bg-primary">{configWeb?.priceDisplayUnit === 1000 ? `${Math.round(s.rate * 1000).toLocaleString('de-DE')}đ / 1000` : `${s.rate}đ`}</span>
-                        <span className={`badge ms-1 ${s.isActive ? 'bg-success' : 'bg-danger'}`}>{s.isActive ? " ON" : " OFF"}</span>
+                        <span className={`badge ms-1 ${s.isActive ? 'bg-success' : 'bg-danger'}`}>{s.isActive ? " On" : " Off"}</span>
                         {s.refil === "on" && (<span className="badge bg-success ms-1"> Bảo hành</span>)}
                         {s.cancel === "on" && (<span className="badge bg-warning ms-1"> Có hủy hoàn</span>)}
                     </span>
@@ -784,7 +784,7 @@ export default function Ordernhanh() {
                         <img src={server.logo} alt={server.name} style={{ width: 24, height: 24, objectFit: 'contain' }} />
                     )} <strong className="badge bg-info">[{server.Magoi}]</strong> - {server.maychu} <span style={{ lineHeight: "1.2", verticalAlign: "middle" }} dangerouslySetInnerHTML={{ __html: server.name }} /> <span className="badge bg-primary">{configWeb?.priceDisplayUnit === 1000 ? `${Math.round(server.rate * 1000).toLocaleString('de-DE')}đ / 1000` : `${server.rate}đ`}
                         </span>
-                        <span className={`badge ms-1 ${server.isActive ? 'bg-success' : 'bg-danger'}`}>{server.isActive ? " ON" : " OFF"}</span>
+                        <span className={`badge ms-1 ${server.isActive ? 'bg-success' : 'bg-danger'}`}>{server.isActive ? " On" : " Off"}</span>
                         {server.refil === "on" && (<span className="badge bg-success ms-1"> Bảo hành</span>)}
                         {server.cancel === "on" && (<span className="badge bg-warning ms-1"> Có hủy hoàn</span>)}
                     </span>
@@ -948,7 +948,7 @@ export default function Ordernhanh() {
                             ))} */}
                             <form onSubmit={handleSubmit}>
                                 {/* Toggle mua nhiều link */}
-                                <div className="form-group mb-3 form-switch d-flex align-items-center gap-2">
+                                <div className="form-group mb-1 form-switch d-flex align-items-center gap-2">
                                     <input
                                         id="multiLinkToggle"
                                         className="form-check-input"

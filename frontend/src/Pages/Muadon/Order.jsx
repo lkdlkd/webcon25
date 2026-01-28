@@ -652,7 +652,7 @@ export default function Order() {
                                                                 </span>
                                                                 {" "}
                                                                 <span className={`badge ${server.isActive ? 'bg-success' : 'bg-danger'}`}>
-                                                                    {server.isActive ? "Hoạt động" : "Bảo trì"}
+                                                                    {server.isActive ? "On" : "Off"}
                                                                 </span>
                                                                 {" "}
                                                                 {server.refil === "on" && (
