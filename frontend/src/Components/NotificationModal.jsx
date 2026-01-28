@@ -5,7 +5,6 @@ import Button from "react-bootstrap/Button";
 export default function NotificationModal({ notifications = [], config = {} }) {
     const [noti, setNoti] = useState(notifications[0] || {});
     const [showModal, setShowModal] = useState(false);
-    console.log("Config in NotificationModal:", config);
     // Kiểm tra và hiển thị modal khi load trang
     useEffect(() => {
         if (notifications.length > 0) {
