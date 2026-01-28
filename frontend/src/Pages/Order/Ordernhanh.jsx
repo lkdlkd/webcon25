@@ -687,6 +687,11 @@ export default function Ordernhanh() {
             const bIdx = categoryOrder.indexOf(b.category);
             return aIdx - bIdx;
         });
+        // Hàm strip HTML để lấy text thuần từ name
+        const stripHtml = (html) => {
+            if (!html) return '';
+            return html.replace(/<[^>]*>/g, '').trim();
+        };
         return sorted.map((s) => ({
             value: s.Magoi,
             label: (
@@ -694,13 +699,15 @@ export default function Ordernhanh() {
                     <span className="font-semibold"> {s.logo && (
                         <img src={s.logo} alt={s.name} style={{ width: 24, height: 24, objectFit: 'contain' }} />
                     )} <strong className="badge bg-info">[{s.Magoi}]</strong> - {s.maychu} <span style={{ lineHeight: "1.2", verticalAlign: "middle" }} dangerouslySetInnerHTML={{ __html: s.name }} /> <span className="badge bg-primary">{configWeb?.priceDisplayUnit === 1000 ? `${Math.round(s.rate * 1000).toLocaleString('de-DE')}đ / 1000` : `${s.rate}đ`}</span>
-                        <span className={`badge ms-1 ${s.isActive ? 'bg-success' : 'bg-danger'}`}>{s.isActive ? " On" : " Off"}</span>
+                        {!s.isActive && (<span className="badge ms-1 bg-danger"> Bảo trì</span>)}
                         {s.refil === "on" && (<span className="badge bg-success ms-1"> Bảo hành</span>)}
                         {s.cancel === "on" && (<span className="badge bg-warning ms-1"> Có hủy hoàn</span>)}
                     </span>
 
                 </div>
             ),
+            // Thêm searchLabel để tìm kiếm theo tên hoặc Magoi
+            searchLabel: `${s.Magoi} ${stripHtml(s.name)} ${s.maychu || ''} ${s.category || ''} ${s.type || ''}`,
             server: s
         }));
     }, [servers, configWeb?.priceDisplayUnit]);
@@ -784,7 +791,7 @@ export default function Ordernhanh() {
                         <img src={server.logo} alt={server.name} style={{ width: 24, height: 24, objectFit: 'contain' }} />
                     )} <strong className="badge bg-info">[{server.Magoi}]</strong> - {server.maychu} <span style={{ lineHeight: "1.2", verticalAlign: "middle" }} dangerouslySetInnerHTML={{ __html: server.name }} /> <span className="badge bg-primary">{configWeb?.priceDisplayUnit === 1000 ? `${Math.round(server.rate * 1000).toLocaleString('de-DE')}đ / 1000` : `${server.rate}đ`}
                         </span>
-                        <span className={`badge ms-1 ${server.isActive ? 'bg-success' : 'bg-danger'}`}>{server.isActive ? " On" : " Off"}</span>
+                        {!server.isActive && (<span className="badge ms-1 bg-danger"> Bảo trì</span>)}
                         {server.refil === "on" && (<span className="badge bg-success ms-1"> Bảo hành</span>)}
                         {server.cancel === "on" && (<span className="badge bg-warning ms-1"> Có hủy hoàn</span>)}
                     </span>
@@ -846,9 +853,16 @@ export default function Ordernhanh() {
                                             setSelectedMagoi("");
                                         }
                                     }}
-                                    placeholder="---Tìm dịch vụ---"
+                                    placeholder="---Tìm dịch vụ theo tên hoặc mã---"
                                     isClearable
                                     isSearchable
+                                    filterOption={(option, inputValue) => {
+                                        if (!inputValue) return true;
+                                        const searchText = inputValue.toLowerCase();
+                                        // Tìm theo searchLabel (chứa Magoi, name, maychu, category, type)
+                                        return option.data.searchLabel?.toLowerCase().includes(searchText) || 
+                                               option.value?.toLowerCase().includes(searchText);
+                                    }}
                                 />
                             </div>
                             <div className="form-group mb-3">
