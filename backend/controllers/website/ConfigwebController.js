@@ -57,6 +57,8 @@ exports.getConfigweb = async (req, res) => {
       affiliateMinDeposit: config.affiliateMinDeposit,
       affiliateCommissionPercent: config.affiliateCommissionPercent,
       depositMatchType: config.depositMatchType,
+      priceDisplayUnit: config.priceDisplayUnit || 1000,
+      showordernhanh: config.showordernhanh !== false, // mặc định true
     };
 
     // Chỉ hiển thị các fields admin nếu user là admin
@@ -144,7 +146,7 @@ exports.updateConfigweb = async (req, res) => {
     if (!user || user.role !== 'admin') {
       return res.status(403).json({ message: 'Chỉ admin mới có quyền truy cập' });
     }
-    const { depositMatchType, tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien, affiliateEnabled, affiliateMinDeposit, affiliateCommissionPercent, withdrawMinAmount, withdrawMaxAmount, withdrawFeePercent, withdrawFeeFixed, withdrawToBankEnabled, withdrawToBalanceEnabled } = req.body;
+    const { depositMatchType, tieude, title, logo, favicon, lienhe, cuphap, linktele, daily, distributor, viewluotban, autoactive, autoremove, autoDeleteMonths, deleteOrders, deleteUsers, deleteHistory, tigia, notenaptien, affiliateEnabled, affiliateMinDeposit, affiliateCommissionPercent, withdrawMinAmount, withdrawMaxAmount, withdrawFeePercent, withdrawFeeFixed, withdrawToBankEnabled, withdrawToBalanceEnabled, priceDisplayUnit, showordernhanh } = req.body;
 
     // Tìm cấu hình hiện tại
     const config = await Configweb.findOne();
@@ -192,6 +194,8 @@ exports.updateConfigweb = async (req, res) => {
     if (withdrawToBankEnabled !== undefined) config.withdrawToBankEnabled = withdrawToBankEnabled;
     if (withdrawToBalanceEnabled !== undefined) config.withdrawToBalanceEnabled = withdrawToBalanceEnabled;
     if (depositMatchType !== undefined) config.depositMatchType = depositMatchType;
+    if (priceDisplayUnit !== undefined) config.priceDisplayUnit = priceDisplayUnit;
+    if (showordernhanh !== undefined) config.showordernhanh = showordernhanh;
     await config.save();
 
     res.status(200).json({ success: true, message: "Cấu hình website được cập nhật thành công", data: config });

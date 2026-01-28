@@ -73,6 +73,8 @@ const Setting = () => {
         footerJs: "", // Mã JS footer
         tigia: "", // Tỷ giá
         notenaptien: "", // Ghi chú nạp tiền
+        priceDisplayUnit: 1000, // Đơn vị hiển thị giá (1 hoặc 1000)
+        showordernhanh: false, // Hiển thị Order nhanh trên trang chủ
     });
     const [loading, setLoading] = useState(false);
     const editorRef = useRef(null);
@@ -100,6 +102,8 @@ const Setting = () => {
                 footerJs: config.data.footerJs || "", // Lấy giá trị footerJs từ API
                 tigia: config.data.tigia || 25000, // Lấy giá trị tigia từ API
                 notenaptien: config.data.notenaptien || "", // Lấy giá trị notenaptien từ API
+                priceDisplayUnit: config.data.priceDisplayUnit || 1000, // Lấy giá trị priceDisplayUnit từ API
+                showordernhanh: config.data.showordernhanh !== false, // Lấy giá trị showordernhanh từ API
             });
         } catch (error) {
             toast.error("Không thể tải cấu hình website!");
@@ -148,6 +152,8 @@ const Setting = () => {
                 footerJs: formData.footerJs, // Gửi mã JS footer lên API
                 tigia: formData.tigia, // Gửi tỷ giá lên API
                 notenaptien: formData.notenaptien, // Gửi ghi chú nạp tiền lên API
+                priceDisplayUnit: formData.priceDisplayUnit, // Gửi đơn vị hiển thị giá lên API
+                showordernhanh: formData.showordernhanh, // Gửi cấu hình hiển thị Order nhanh lên API
             };
             await updateConfigWeb(sanitizedData, token);
             fetchConfig(); // Tải lại cấu hình sau khi cập nhật
@@ -370,6 +376,24 @@ const Setting = () => {
                                                     Tỷ giá được dùng để quy đổi giá dịch vụ
                                                 </small>
                                             </div>
+                                            <div className="mb-0 mt-3">
+                                                <label className="form-label fw-semibold mb-1" style={{ fontSize: '0.875rem' }}>
+                                                    <i className="fas fa-tags me-1 text-info"></i>
+                                                    Đơn vị hiển thị giá
+                                                </label>
+                                                <select
+                                                    className="form-select"
+                                                    value={formData.priceDisplayUnit || 1000}
+                                                    onChange={(e) => setFormData({ ...formData, priceDisplayUnit: Number(e.target.value) })}
+                                                >
+                                                    <option value={1000}>Hiển thị giá / 1000 (VD: 31.000đ / 1000)</option>
+                                                    <option value={1}>Hiển thị giá / 1 (VD: 31đ / 1)</option>
+                                                </select>
+                                                <small className="text-muted d-block mt-1" style={{ fontSize: '0.75rem' }}>
+                                                    <i className="fas fa-info-circle me-1"></i>
+                                                    Chọn cách hiển thị giá dịch vụ trên trang đặt hàng
+                                                </small>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -519,6 +543,20 @@ const Setting = () => {
                                                 >
                                                     <option value="false">Ẩn</option>
                                                     <option value="true">Hiển thị</option>
+                                                </select>
+                                            </div>
+                                            <div className="mb-3">
+                                                <label className="form-label fw-semibold mb-1" style={{ fontSize: '0.875rem' }}>
+                                                    <i className="fas fa-bolt me-1 text-warning"></i>
+                                                    Hiển thị Order nhanh (Trang chủ)
+                                                </label>
+                                                <select
+                                                    className="form-select"
+                                                    value={formData.showordernhanh ? "true" : "false"}
+                                                    onChange={(e) => setFormData({ ...formData, showordernhanh: e.target.value === "true" })}
+                                                >
+                                                    <option value="true">Hiển thị</option>
+                                                    <option value="false">Ẩn</option>
                                                 </select>
                                             </div>
                                             <div className="mb-3">

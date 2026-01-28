@@ -45,6 +45,12 @@ const configwebSchema = new mongoose.Schema({
   // Deposit matching type
   depositMatchType: { type: String, enum: ['code', 'username'], default: 'code' }, // 'code' = dùng mã nạp tiền, 'username' = dùng username
 
+  // Price display configuration
+  priceDisplayUnit: { type: Number, enum: [1, 1000], default: 1 }, // Hiển thị giá theo 1 hoặc 1000
+
+  // UI configuration
+  showordernhanh: { type: Boolean, default: false }, // Hiển thị giao diện Order nhanh trên trang chủ
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("Configweb", configwebSchema);
